@@ -5,5 +5,5 @@ Fungsi:
 - Operator antrian
 - Manajemen loket & user
 
-Jalankan:
+Jalankan :
 php spark serve
