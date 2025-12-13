@@ -5,5 +5,9 @@ Fungsi:
 - Display antrean
 - Trigger suara
 
+Instal depedensis
+-
+-
+
 Jalankan:
-python app.py
+- python app.py
