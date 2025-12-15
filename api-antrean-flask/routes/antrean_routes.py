@@ -39,8 +39,8 @@ def ambil_antrean():
 
     # Simpan antrean baru
     cursor.execute("""
-    INSERT INTO antrian (kode_jenis, kode_loket, nomor, tanggal, status, user_id, created_at)
-    VALUES (%s, %s, %s, CURDATE(), 'Menunggu', NULL, NOW())
+INSERT INTO antrian (kode_jenis, kode_loket, nomor, tanggal, status)
+VALUES (%s, %s, %s, CURDATE(), 'Menunggu')
 """, (kode_jenis, kode_loket, next_number))
     conn.commit()
 
