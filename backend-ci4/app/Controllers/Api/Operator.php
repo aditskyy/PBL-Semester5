@@ -21,107 +21,122 @@ class Operator extends ResourceController
     }
 
     /**
-     * 🟢 Panggil antrian pertama kali
+     * 🛰️ Helper untuk mengirim data ke WebSocket Server
      */
-     public function panggil()
+    private function emitSocket($event, $data)
 {
-    $antrianModel = new AntrianModel();
-    $idAntrian = $this->request->getPost('id_antrian');
-    $userId = session()->get('user_id'); // Ambil dari session
-
-    if (!$idAntrian || !$userId) {
-        return $this->response->setJSON([
-            'status' => 'error',
-            'message' => 'ID antrian atau user tidak ditemukan.'
-        ])->setStatusCode(400);
+    $client = \Config\Services::curlrequest();
+    try {
+        $client->post('http://127.0.0.1:5000/api/emit', [
+            'json' => [
+                'event' => $event,
+                'data'  => $data
+            ],
+            'timeout' => 2
+        ]);
+    } catch (\Exception $e) {
+        log_message('error', 'Socket emit gagal: ' . $e->getMessage());
     }
-
-    $antrianModel->update($idAntrian, [
-        'status' => 'Dipanggil',
-        'aksi' => 'PANGGIL',
-        'user_id' => $userId, // ⬅ SIMPAN USER ID
-        'waktu_panggil' => date('Y-m-d H:i:s')
-    ]);
-
-    return $this->response->setJSON([
-        'status' => 'success',
-        'message' => 'Antrian berhasil dipanggil.'
-    ]);
 }
 
     /**
-     * 🟢 Panggil Antrian Selanjutnya
+     * 🟢 Panggil antrian pertama kali (dari list antrian)
      */
-    public function panggilSelanjutnya()
-    {
-        $kodeJenis = $this->request->getPost('kode_jenis');
-        $kodeLoket = $this->request->getPost('kode_loket');
-        $userId = session()->get('user_id');
+    public function panggil()
+{
+    $idAntrian = $this->request->getPost('id_antrian');
+    $kodeLoket = $this->request->getPost('kode_loket');
+    $userId = session()->get('user_id');
 
-        // Tandai antrian yang sedang dipanggil jadi "Selesai"
-        $this->antrianModel
-            ->where('kode_loket', $kodeLoket)
-            ->where('status', 'Dipanggil')
-            ->set(['status' => 'Selesai'])
-            ->update();
-
-        // Ambil antrian berikutnya
-        $antrian = $this->antrianModel
-            ->where('kode_jenis', $kodeJenis)
-            ->where('status', 'Menunggu')
-            ->orderBy('id_antrian', 'ASC')
-            ->first();
-
-        if (!$antrian) {
-            return $this->respond(['status' => 'error', 'message' => 'Tidak ada antrian berikutnya.']);
-        }
-
-        // Update ke "Dipanggil"
-        $this->antrianModel->update($antrian['id_antrian'], [
-            'status' => 'Dipanggil',
-            'kode_loket' => $kodeLoket
-        ]);
-
-        // Simpan log
-        $this->logModel->insert([
-    'id_antrian' => $antrian['id_antrian'],
-    'aksi' => 'PANGGIL',
-    'user_id' => $userId,
-    'waktu' => date('Y-m-d H:i:s')
-]);
-
-        return $this->respond([
-            'status' => 'success',
-            'message' => 'Antrian berikutnya dipanggil.',
-            'data' => $antrian
-        ]);
+    if (!$idAntrian || !$userId) {
+        return $this->fail('ID antrian atau user tidak ditemukan.', 400);
     }
+
+    $antrian = $this->antrianModel->find($idAntrian);
+
+    $this->antrianModel->update($idAntrian, [
+        'status'        => 'Dipanggil',
+        'kode_loket'    => $kodeLoket,
+        'user_id'       => $userId,
+        'waktu_panggil' => date('Y-m-d H:i:s')
+    ]);
+
+    // 🔥 SOCKET
+    $this->emitSocket('panggil_antrean', [
+        'nomor'      => $antrian['nomor'],
+        'kode_loket' => $kodeLoket,
+        'kode_jenis' => $antrian['kode_jenis']
+    ]);
+
+    return $this->respond(['status' => 'success', 'message' => 'Antrian dipanggil.']);
+}
 
     /**
-     * 🟡 Panggil Ulang Antrian
+     * 🟢 Panggil Antrian Selanjutnya (Auto Next)
+     */
+    public function panggilSelanjutnya()
+{
+    $kodeJenis = $this->request->getPost('kode_jenis');
+    $kodeLoket = $this->request->getPost('kode_loket');
+    $userId = session()->get('user_id');
+
+    // Selesaikan yang lama
+    $this->antrianModel
+        ->where('kode_loket', $kodeLoket)
+        ->where('status', 'Dipanggil')
+        ->set(['status' => 'Selesai'])
+        ->update();
+
+    // Ambil berikutnya
+    $antrian = $this->antrianModel
+        ->where('kode_jenis', $kodeJenis)
+        ->where('status', 'Menunggu')
+        ->orderBy('id_antrian', 'ASC')
+        ->first();
+
+    if (!$antrian) {
+        return $this->fail('Tidak ada antrian berikutnya.', 404);
+    }
+
+    $this->antrianModel->update($antrian['id_antrian'], [
+        'status'     => 'Dipanggil',
+        'kode_loket' => $kodeLoket
+    ]);
+
+    // 🔥 SOCKET (FIELD VALID)
+    $this->emitSocket('panggil_antrean', [
+        'nomor'      => $antrian['nomor'],
+        'kode_loket' => $kodeLoket,
+        'kode_jenis' => $kodeJenis
+    ]);
+
+    return $this->respond(['status' => 'success', 'data' => $antrian]);
+}
+
+    /**
+     * 🟡 Panggil Ulang Antrian (Recall)
      */
     public function panggilUlang()
-    {
-        $idAntrian = $this->request->getPost('id_antrian');
-        $antrian = $this->antrianModel->find($idAntrian);
+{
+    $idAntrian = $this->request->getPost('id_antrian');
+    $antrian = $this->antrianModel->find($idAntrian);
 
-        if (!$antrian) {
-            return $this->respond(['status' => 'error', 'message' => 'Data antrian tidak ditemukan.']);
-        }
-
-        // Log panggil ulang
-        $this->logModel->insert([
-            'id_antrian' => $idAntrian,
-            'aksi' => 'Panggil Ulang',
-            'waktu' => date('Y-m-d H:i:s')
-        ]);
-
-        return $this->respond([
-            'status' => 'success',
-            'message' => 'Antrian dipanggil ulang.',
-            'data' => $antrian
-        ]);
+    if (!$antrian) {
+        return $this->failNotFound('Antrian tidak ditemukan.');
     }
+
+    // 🔥 SOCKET (TANPA UBAH UI)
+    $this->emitSocket('panggil_ulang', [
+        'nomor'      => $antrian['nomor'],
+        'kode_loket' => $antrian['kode_loket']
+    ]);
+
+    return $this->respond([
+        'status'  => 'success',
+        'message' => 'Panggilan ulang dikirim.'
+    ]);
+}
+
 
     /**
      * 🔴 Selesaikan Antrian

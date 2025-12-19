@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:flutter_tts/flutter_tts.dart';
+
 
 class DisplayPage extends StatefulWidget {
   const DisplayPage({super.key});
@@ -12,21 +15,35 @@ class DisplayPage extends StatefulWidget {
 
 class _DisplayPageState extends State<DisplayPage> {
   late Future<Map<String, dynamic>> profileFuture;
+  late FlutterTts flutterTts;
+  late IO.Socket socket;
 
   String serverTime = '';
   String serverDate = '';
+  String? activeCalledKode;
   Timer? timer;
 
-  // 🔥 STATE DINAMIS ANTREAN
+  // 🔥 STATE ANTREAN
   List<dynamic> currentQueue = [];
   List<dynamic> historyQueue = [];
+
+  // 📍 TAMBAHKAN KEY DI SINI
+  final GlobalKey<AnimatedListState> _queueListKey = GlobalKey<AnimatedListState>();
 
   @override
   void initState() {
     super.initState();
+
+    //  INIT TTS DI initState()
+    flutterTts = FlutterTts();
+    flutterTts.setLanguage('id-ID');
+    flutterTts.setSpeechRate(0.45);
+    flutterTts.setPitch(1.0);
+
     profileFuture = fetchProfile();
     fetchTime();
-    fetchDisplay();
+    fetchDisplay(); // initial data
+    initSocket();   // 🔥 realtime
 
     timer = Timer.periodic(
       const Duration(seconds: 1),
@@ -37,8 +54,110 @@ class _DisplayPageState extends State<DisplayPage> {
   @override
   void dispose() {
     timer?.cancel();
+    socket.disconnect();
+    socket.dispose();
     super.dispose();
   }
+
+   // ================= SOCKET INIT =================
+  void initSocket() {
+    socket = IO.io(
+      'http://localhost:5000',
+      IO.OptionBuilder()
+          .setTransports(['websocket'])
+          .disableAutoConnect()
+          .build(),
+    );
+
+    socket.connect();
+
+    socket.onConnect((_) {
+      print('🟢 Connected to socket');
+    });
+
+    socket.onDisconnect((_) {
+      print('🔴 Disconnected from socket');
+    });
+
+    socket.on('ambil_antrean', onAmbilAntrean);
+    socket.on('panggil_antrean', onPanggilAntrean);
+    socket.on('panggil_ulang', onPanggilUlang);
+  }
+
+  // =========================================================
+// 🔌 SOCKET HANDLERS (CLEAN & SAFE VERSION)
+// =========================================================
+
+// 1️⃣ HANDLE AMBIL ANTREAN (Cegah Duplikat)
+void onAmbilAntrean(dynamic data) {
+  // Gunakan 'nomor' sesuai kiriman backend
+  final exists = currentQueue.any(
+    (item) => item['nomor'].toString() == data['nomor'].toString(),
+  );
+
+  if (exists) return; 
+
+  currentQueue.insert(0, data);
+
+  _queueListKey.currentState?.insertItem(
+    0,
+    duration: const Duration(milliseconds: 400),
+  );
+}
+
+// 2️⃣ HANDLE PANGGIL ANTREAN (Safety Check & Audio)
+void onPanggilAntrean(dynamic data) {
+  print('📡 panggil_antrean masuk: $data');
+
+  // 🔊 AUDIO
+  speakAntrean(
+    data['nomor'].toString(),
+    data['kode_loket'].toString(),
+  );
+
+  // ✨ Glow sementara
+  setState(() {
+    activeCalledKode = data['nomor'].toString();
+  });
+
+  // ⏱️ Reset glow + sync ulang data dari API
+  Future.delayed(const Duration(seconds: 2), () {
+    if (!mounted) return;
+
+    setState(() {
+      activeCalledKode = null;
+    });
+
+    // 🔄 SATU-SATUNYA SUMBER DATA UI
+    fetchDisplay();
+  });
+}
+
+
+void onPanggilUlang(dynamic data) {
+  // 🔊 Sesuaikan parameter: data['nomor'] & data['kode_loket']
+  speakAntrean(data['nomor'].toString(), data['kode_loket']);
+  
+  print('🔊 Re-calling queue: ${data['nomor']}');
+}
+
+// =========================================================
+// 🔊 FUNGSI AUDIO (TTS)
+// =========================================================
+
+Future<void> speakAntrean(dynamic nomor, String loket) async {
+  await flutterTts.stop();
+
+  final String nomorStr = nomor.toString();
+
+  // Optimasi pembacaan: A001 -> A 0 0 1
+  final String formatNomor = nomorStr.split('').join(' ');
+
+  await flutterTts.speak(
+    'Nomor antrian $formatNomor, silakan menuju loket $loket',
+  );
+}
+
 
   Future<Map<String, dynamic>> fetchProfile() async {
     final res =
@@ -71,7 +190,12 @@ class _DisplayPageState extends State<DisplayPage> {
           currentQueue = data['current'];
           historyQueue = data['history'];
         });
+
+      // Memastikan AnimatedList melakukan sinkronisasi index dengan data terbaru
+      // setelah data awal dimuat dari API
+      _queueListKey.currentState?.setState(() {});
       }
+
     } catch (_) {}
   }
 
@@ -187,31 +311,33 @@ class _DisplayPageState extends State<DisplayPage> {
                                         ),
                                       ),
                                     )
-                                  : GridView.builder(
-                                      shrinkWrap: true,
-                                      physics:
-                                          const NeverScrollableScrollPhysics(),
-                                      itemCount: currentQueue.length,
-                                      gridDelegate:
-                                          SliverGridDelegateWithFixedCrossAxisCount(
-                                        crossAxisCount:
-                                            gridCount(context),
-                                        crossAxisSpacing: 12,
-                                        mainAxisSpacing: 12,
-                                        childAspectRatio: 1.4,
-                                      ),
-                                      itemBuilder: (context, index) {
-                                        final item =
-                                            currentQueue[index];
-                                        return AntreanCard(
-                                          title: 'ANTREAN',
-                                          nomor: item['kode'],
-                                          loket: item['loket'],
-                                          color:
-                                              hexToColor(item['color']),
-                                        );
-                                      },
-                                    ),
+                                  : AnimatedList(
+  key: _queueListKey,
+  shrinkWrap: true,
+  initialItemCount: currentQueue.length,
+  physics: const NeverScrollableScrollPhysics(),
+  itemBuilder: (context, index, animation) {
+  final item = currentQueue[index];
+
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: SizeTransition( // Ubah Slide jadi Size agar lebih rapi saat removeItem
+      sizeFactor: animation,
+      child: FadeTransition(
+        opacity: animation,
+        child: AntreanCard(
+          title: 'ANTREAN',
+          nomor: item['nomor'].toString(),
+          loket: item['kode_loket'].toString(),
+          color: hexToColor(item['color']),
+          active: item['nomor'].toString() == activeCalledKode, // 📍 PASS STATE DI SINI
+        ),
+      ),
+    ),
+  );
+},
+),
+
 
                               const SizedBox(height: 20),
 
@@ -247,8 +373,8 @@ class _DisplayPageState extends State<DisplayPage> {
                                           final item =
                                               historyQueue[index];
                                           return RiwayatCard(
-                                            item['kode'],
-                                            item['loket'],
+                                            item['nomor'].toString(),      // GANTI dari item['kode']
+                                            item['kode_loket'].toString(),
                                             hexToColor(
                                                 item['color']),
                                           );
@@ -336,19 +462,35 @@ class _MarqueeTextState extends State<MarqueeText>
 class AntreanCard extends StatelessWidget {
   final String title, nomor, loket;
   final Color color;
-  const AntreanCard(
-      {super.key,
-      required this.title,
-      required this.nomor,
-      required this.loket,
-      required this.color});
+  final bool active; // 📍 Tambah ini
+
+  const AntreanCard({
+    super.key,
+    required this.title,
+    required this.nomor,
+    required this.loket,
+    required this.color,
+    this.active = false, // 📍 Default false
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return AnimatedContainer( // Pakai AnimatedContainer agar transisi glow halus
+      duration: const Duration(milliseconds: 500),
       padding: const EdgeInsets.all(16),
-      decoration:
-          BoxDecoration(color: color, borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(
+        color: active ? color.withOpacity(0.9) : color,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: active
+            ? [
+                BoxShadow(
+                  color: Colors.yellow.withOpacity(0.8),
+                  blurRadius: 20,
+                  spreadRadius: 4,
+                )
+              ]
+            : [],
+      ),
       child: Column(
         children: [
           Text(title, style: const TextStyle(color: Colors.white70)),

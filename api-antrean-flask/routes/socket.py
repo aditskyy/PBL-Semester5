@@ -23,3 +23,9 @@ def emit_ambil_antrean(data):
 def emit_panggil_antrean(data):
     print('📢 emit panggil_antrean:', data)
     socketio.emit('panggil_antrean', data)
+
+
+def emit_panggil_ulang(data):
+    print('🔁 emit panggil_ulang:', data)
+    socketio.emit('panggil_ulang', data)
+

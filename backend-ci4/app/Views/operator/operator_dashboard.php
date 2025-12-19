@@ -86,7 +86,7 @@ $(document).ready(function() {
 
     $("#btnSelanjutnya").click(function() {
         $.post("<?= site_url('api/operator/panggilSelanjutnya') ?>", { kode_jenis: kodeJenis, kode_loket: kodeLoket }, function(res) {
-            alert(res.message);
+            console.log(res);
             refreshDashboard();
         }).fail(function(xhr) {
             alert("Gagal panggil selanjutnya: " + xhr.responseText);
