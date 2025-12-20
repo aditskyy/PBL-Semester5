@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 
 class ApiService {
   static const String baseUrl =
-      'http://192.168.1.19:5000'; // GANTI IP SESUAI SERVERMU
+      'http://localhost:5000/api'; // GANTI IP SESUAI SERVERMU
 
   static Future<Map<String, dynamic>> ambilAntrean([
     String kodeJenis = "A",

@@ -27,7 +27,7 @@ class Operator extends ResourceController
 {
     $client = \Config\Services::curlrequest();
     try {
-        $client->post('http://127.0.0.1:5000/api/emit', [
+        $client->post('http://localhost:5000/api/emit', [
             'json' => [
                 'event' => $event,
                 'data'  => $data
@@ -125,7 +125,7 @@ class Operator extends ResourceController
         return $this->failNotFound('Antrian tidak ditemukan.');
     }
 
-    // 🔥 SOCKET (TANPA UBAH UI)
+    // 🔥 SOCKET 
     $this->emitSocket('panggil_ulang', [
         'nomor'      => $antrian['nomor'],
         'kode_loket' => $antrian['kode_loket']
@@ -168,6 +168,11 @@ class Operator extends ResourceController
         'aksi'       => 'SELESAI',
         'waktu'      => date('Y-m-d H:i:s')
     ]);
+
+    // 🔥 SOCKET 
+    $this->emitSocket('selesai_antrean', [
+    'nomor' => $antrian['nomor']
+     ]);
 
     return $this->respond([
         'status' => 'success',

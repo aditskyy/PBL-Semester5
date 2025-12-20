@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:js' as js;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:socket_io_client/socket_io_client.dart' as IO;
@@ -39,10 +40,9 @@ class _DisplayPageState extends State<DisplayPage> {
     flutterTts.setLanguage('id-ID');
     flutterTts.setSpeechRate(0.45);
     flutterTts.setPitch(1.0);
-
     profileFuture = fetchProfile();
+
     fetchTime();
-    fetchDisplay(); // initial data
     initSocket();   // 🔥 realtime
 
     timer = Timer.periodic(
@@ -79,58 +79,55 @@ class _DisplayPageState extends State<DisplayPage> {
       print('🔴 Disconnected from socket');
     });
 
-    socket.on('ambil_antrean', onAmbilAntrean);
-    socket.on('panggil_antrean', onPanggilAntrean);
-    socket.on('panggil_ulang', onPanggilUlang);
+    socket.on('panggil_antrean', (data) {
+  print('📡 EVENT panggil_antrean diterima: $data');
+  onPanggilAntrean(data);
+});
+
+socket.on('panggil_ulang', (data) {
+  print('🔁 EVENT panggil_ulang diterima: $data');
+  onPanggilUlang(data);
+});
+
+socket.on('selesai_antrean', (data) {
+  print('✅ selesai_antrean: $data');
+  onSelesaiAntrean(data);
+});
+
+
   }
 
   // =========================================================
 // 🔌 SOCKET HANDLERS (CLEAN & SAFE VERSION)
 // =========================================================
-
-// 1️⃣ HANDLE AMBIL ANTREAN (Cegah Duplikat)
-void onAmbilAntrean(dynamic data) {
-  // Gunakan 'nomor' sesuai kiriman backend
-  final exists = currentQueue.any(
-    (item) => item['nomor'].toString() == data['nomor'].toString(),
-  );
-
-  if (exists) return; 
-
-  currentQueue.insert(0, data);
-
-  _queueListKey.currentState?.insertItem(
-    0,
-    duration: const Duration(milliseconds: 400),
-  );
-}
-
-// 2️⃣ HANDLE PANGGIL ANTREAN (Safety Check & Audio)
 void onPanggilAntrean(dynamic data) {
   print('📡 panggil_antrean masuk: $data');
 
+  final nomor = data['nomor'].toString();
+  final loket = data['kode_loket'].toString();
+
   // 🔊 AUDIO
-  speakAntrean(
-    data['nomor'].toString(),
-    data['kode_loket'].toString(),
+  speakAntrean(nomor, loket);
+
+  // ✨ GLOW
+  setState(() {
+    activeCalledKode = nomor;
+  });
+
+  // 🟢 MASUKKAN KE CURRENT (SEDANG DIPANGGIL)
+  final exists = currentQueue.any(
+    (item) => item['nomor'] == nomor,
   );
 
-  // ✨ Glow sementara
-  setState(() {
-    activeCalledKode = data['nomor'].toString();
-  });
-
-  // ⏱️ Reset glow + sync ulang data dari API
-  Future.delayed(const Duration(seconds: 2), () {
-    if (!mounted) return;
-
+  if (!exists) {
     setState(() {
-      activeCalledKode = null;
+      currentQueue.insert(0, {
+        'nomor': nomor,
+        'kode_loket': loket,
+        'color': '#1E88E5',
+      });
     });
-
-    // 🔄 SATU-SATUNYA SUMBER DATA UI
-    fetchDisplay();
-  });
+  }
 }
 
 
@@ -141,22 +138,64 @@ void onPanggilUlang(dynamic data) {
   print('🔊 Re-calling queue: ${data['nomor']}');
 }
 
+void onSelesaiAntrean(dynamic data) {
+  final nomor = data['nomor'].toString();
+
+  final index = currentQueue.indexWhere(
+    (item) => item['nomor'] == nomor,
+  );
+
+  if (index != -1) {
+    final removed = currentQueue.removeAt(index);
+
+    setState(() {
+      historyQueue.insert(0, removed);
+      activeCalledKode = null;
+    });
+  }
+}
+
+
 // =========================================================
 // 🔊 FUNGSI AUDIO (TTS)
 // =========================================================
 
+//Future<void> speakAntrean(dynamic nomor, String loket) async {
+ // await flutterTts.stop();
+
+ // final String nomorStr = nomor.toString();
+
+  // Optimasi pembacaan: A001 -> A 0 0 1
+  //final String formatNomor = nomorStr.split('').join(' ');
+
+  //await flutterTts.speak(
+    //'Nomor antrian $formatNomor, silakan menuju loket $loket',
+ // );
+//}
+
 Future<void> speakAntrean(dynamic nomor, String loket) async {
+  // Cek apakah audio sudah diizinkan browser
+  final unlocked = js.context.callMethod('isSoundUnlocked');
+
+  if (unlocked != true) {
+    debugPrint('🔇 Audio belum diaktifkan oleh user');
+    return;
+  }
+
   await flutterTts.stop();
 
   final String nomorStr = nomor.toString();
-
-  // Optimasi pembacaan: A001 -> A 0 0 1
   final String formatNomor = nomorStr.split('').join(' ');
+
+  await flutterTts.setLanguage('id-ID');
+  await flutterTts.setSpeechRate(0.45);
+  await flutterTts.setVolume(1.0);
 
   await flutterTts.speak(
     'Nomor antrian $formatNomor, silakan menuju loket $loket',
   );
 }
+
 
 
   Future<Map<String, dynamic>> fetchProfile() async {
