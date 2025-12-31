@@ -53,6 +53,12 @@ $routes->post('api/operator/panggilUlang', 'Api\Operator::panggilUlang');
 $routes->post('api/operator/selesai', 'Api\Operator::selesai');
 $routes->post('api/operator/resetAntrian', 'Api\Operator::resetAntrian');
 $routes->get('api/loket/byJenis/(:segment)', 'Api\LoketController::byJenis/$1');
+$routes->group('api', ['filter' => 'cors'], function ($routes) {
+    $routes->get('profile', 'Api\Profile::index');
+});
+
+
+
 
 // Admin
 $routes->get('/logout', 'Admin\AdminController::logout');
@@ -97,11 +103,21 @@ $routes->group('admin', ['filter' => 'auth'], function($routes) {
 });
 
 // Log Antrian 
-$routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($routes) {
+$routes->group('admin', ['namespace' => 'App\Controllers\Admin'], ['filter' => 'auth'], function($routes) {
     $routes->get('log-antrian', 'LogAntrianController::index');
     $routes->post('log-antrian/filter', 'LogAntrianController::filter');
     $routes->get('log-antrian/reset', 'LogAntrianController::reset');
 });
+
+// Profile
+$routes->group('admin', ['filter' => 'auth'], function ($routes) {
+    $routes->get('profile', 'Admin\ProfileController::index');
+    $routes->get('profile/create', 'Admin\ProfileController::create');
+    $routes->post('profile/store', 'Admin\ProfileController::store');
+    $routes->get('profile/edit/(:num)', 'Admin\ProfileController::edit/$1');
+    $routes->post('profile/update/(:num)', 'Admin\ProfileController::update/$1');
+});
+
 
 
 

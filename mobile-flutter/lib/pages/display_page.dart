@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:async';
-import 'dart:js' as js;
+import 'package:audioplayers/audioplayers.dart';
+import 'package:youtube_player_flutter/youtube_player_flutter.dart';
+//import 'dart:js' as js;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:socket_io_client/socket_io_client.dart' as IO;
@@ -30,39 +32,54 @@ class _DisplayPageState extends State<DisplayPage> {
 
   // 📍 TAMBAHKAN KEY DI SINI
   final GlobalKey<AnimatedListState> _queueListKey = GlobalKey<AnimatedListState>();
-
+  final AudioPlayer audioPlayer = AudioPlayer();
+  
   @override
-  void initState() {
-    super.initState();
+void initState() {
+  super.initState();
+  profileFuture = fetchProfile();
+  audioPlayer.setReleaseMode(ReleaseMode.stop);
 
-    //  INIT TTS DI initState()
-    flutterTts = FlutterTts();
-    flutterTts.setLanguage('id-ID');
-    flutterTts.setSpeechRate(0.45);
-    flutterTts.setPitch(1.0);
-    profileFuture = fetchProfile();
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    initAfterUIReady();
+  });
+}
 
-    fetchTime();
-    initSocket();   // 🔥 realtime
+void initAfterUIReady() {
+  // ✅ TTS aman
+  flutterTts = FlutterTts();
+  flutterTts.setLanguage('id-ID');
+  flutterTts.setSpeechRate(0.45);
+  flutterTts.setPitch(1.0);
 
-    timer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => fetchTime(),
-    );
-  }
+  // ✅ socket aman
+  initSocket();
+
+  fetchDisplay();
+  
+  // ✅ timer aman
+  timer = Timer.periodic(
+    const Duration(seconds: 1),
+    (_) {
+      if (!mounted) return;
+      fetchTime();
+    },
+  );
+}
 
   @override
   void dispose() {
     timer?.cancel();
     socket.disconnect();
     socket.dispose();
+    audioPlayer.dispose();
     super.dispose();
   }
 
    // ================= SOCKET INIT =================
   void initSocket() {
     socket = IO.io(
-      'http://localhost:5000',
+      'http://192.168.1.2:5000',
       IO.OptionBuilder()
           .setTransports(['websocket'])
           .disableAutoConnect()
@@ -105,109 +122,130 @@ void onPanggilAntrean(dynamic data) {
 
   final nomor = data['nomor'].toString();
   final loket = data['kode_loket'].toString();
+  // Mengambil warna dinamis dari socket
+  final warnaStr = data['warna'] ?? '#1E88E5'; 
 
-  // 🔊 AUDIO
+  // 🔊 AUDIO: Jalankan TTS (Fungsi ini jangan sampai hilang)
   speakAntrean(nomor, loket);
 
-  // ✨ GLOW
   setState(() {
+    // ✨ GLOW: Tandai nomor mana yang sedang aktif bersuara
+    activeCalledKode = nomor;
+
+    // 🔄 LOGIKA MULTI-LOKET
+    // Cari apakah loket ini sudah ada di daftar 'currentQueue'
+    final index = currentQueue.indexWhere(
+      (item) => item['kode_loket'].toString() == loket,
+    );
+
+    if (index != -1) {
+      // ✅ JIKA LOKET SUDAH ADA: Update nomor dan warnanya
+      currentQueue[index]['nomor'] = nomor;
+      currentQueue[index]['warna'] = warnaStr; // Update warna jika di DB berubah
+    } else {
+      // ✅ JIKA LOKET BELUM ADA: Tambahkan ke daftar
+      currentQueue.add({
+        'nomor': nomor,
+        'kode_loket': loket,
+        'warna': warnaStr,
+      });
+
+      // ↕️ SORTING: Supaya urutan di TV tetap Loket 1, 2, 3 (tidak acak)
+      currentQueue.sort((a, b) => 
+        a['kode_loket'].toString().compareTo(b['kode_loket'].toString())
+      );
+    }
+  });
+}
+
+void onPanggilUlang(dynamic data) {
+  print('📡 panggil_ulang masuk: $data');
+
+  final nomor = data['nomor'].toString();
+  final loket = data['kode_loket'].toString();
+
+  // 🔊 AUDIO: Putar ulang suara panggilannya
+  speakAntrean(nomor, loket);
+
+  setState(() {
+    // ✨ GLOW: Tandai kembali nomor ini agar kartunya berkedip/glow di TV
     activeCalledKode = nomor;
   });
 
-  // 🟢 MASUKKAN KE CURRENT (SEDANG DIPANGGIL)
-  final exists = currentQueue.any(
-    (item) => item['nomor'] == nomor,
-  );
-
-  if (!exists) {
-    setState(() {
-      currentQueue.insert(0, {
-        'nomor': nomor,
-        'kode_loket': loket,
-        'color': '#1E88E5',
-      });
-    });
-  }
+  print('🔊 Re-calling queue: $nomor pada Loket: $loket');
 }
 
-
-void onPanggilUlang(dynamic data) {
-  // 🔊 Sesuaikan parameter: data['nomor'] & data['kode_loket']
-  speakAntrean(data['nomor'].toString(), data['kode_loket']);
-  
-  print('🔊 Re-calling queue: ${data['nomor']}');
-}
 
 void onSelesaiAntrean(dynamic data) {
-  final nomor = data['nomor'].toString();
+  // Print ini sangat membantu saat debugging di TV
+  print('📡 selesai_antrean masuk: $data');
+  
+  final loket = data['kode_loket'].toString(); 
 
-  final index = currentQueue.indexWhere(
-    (item) => item['nomor'] == nomor,
-  );
+  setState(() {
+    final index = currentQueue.indexWhere(
+      (item) => item['kode_loket'].toString() == loket, 
+    );
 
-  if (index != -1) {
-    final removed = currentQueue.removeAt(index);
-
-    setState(() {
+    if (index != -1) {
+      // 1. Ambil data yang dihapus (termasuk data nomor, kode_loket, dan warna)
+      final removed = currentQueue.removeAt(index);
+      
+      // 2. Masukkan ke historyQueue
+      // Data 'removed' ini tetap membawa field 'color', 
+      // Jadi Riwayat Card di bawah bisa tetap berwarna jika kamu mau.
       historyQueue.insert(0, removed);
-      activeCalledKode = null;
-    });
-  }
+      
+      // 3. Batasi history agar tidak terlalu panjang (misal maksimal 10)
+      if (historyQueue.length > 10) {
+        historyQueue.removeLast();
+      }
+      
+      // 4. Reset glow jika nomor tersebut adalah yang terakhir dipanggil
+      if (activeCalledKode == removed['nomor']) {
+        activeCalledKode = null;
+      }
+    }
+  });
 }
 
-
-// =========================================================
-// 🔊 FUNGSI AUDIO (TTS)
-// =========================================================
-
-//Future<void> speakAntrean(dynamic nomor, String loket) async {
- // await flutterTts.stop();
-
- // final String nomorStr = nomor.toString();
-
-  // Optimasi pembacaan: A001 -> A 0 0 1
-  //final String formatNomor = nomorStr.split('').join(' ');
-
-  //await flutterTts.speak(
-    //'Nomor antrian $formatNomor, silakan menuju loket $loket',
- // );
-//}
 
 Future<void> speakAntrean(dynamic nomor, String loket) async {
-  // Cek apakah audio sudah diizinkan browser
-  final unlocked = js.context.callMethod('isSoundUnlocked');
+    if (!mounted) return;
 
-  if (unlocked != true) {
-    debugPrint('🔇 Audio belum diaktifkan oleh user');
-    return;
+    try {
+      // A. Hentikan suara yang sedang berjalan (biar tidak tumpang tindih)
+      await flutterTts.stop();
+      await audioPlayer.stop();
+
+      // B. Putar Suara Bell dari Assets
+      // Kita gunakan AssetSource untuk file yang ada di folder assets
+      await audioPlayer.play(AssetSource('bell.mp3'));
+
+      // C. Beri jeda sebentar (misal 2 detik) agar Bell selesai baru TTS bicara
+      // Sesuaikan durasi ini dengan panjang suara bell Anda
+      await Future.delayed(const Duration(seconds: 2));
+
+      // D. Jalankan TTS
+      final formatNomor = nomor.toString().split('').join(' ');
+      await flutterTts.speak(
+        'Nomor antrian $formatNomor, silakan menuju loket $loket',
+      );
+    } catch (e) {
+      print("Error pada Audio: $e");
+    }
   }
-
-  await flutterTts.stop();
-
-  final String nomorStr = nomor.toString();
-  final String formatNomor = nomorStr.split('').join(' ');
-
-  await flutterTts.setLanguage('id-ID');
-  await flutterTts.setSpeechRate(0.45);
-  await flutterTts.setVolume(1.0);
-
-  await flutterTts.speak(
-    'Nomor antrian $formatNomor, silakan menuju loket $loket',
-  );
-}
-
-
 
   Future<Map<String, dynamic>> fetchProfile() async {
     final res =
-        await http.get(Uri.parse('http://localhost:5000/profile'));
+        await http.get(Uri.parse('http://192.168.1.2:5000/profile'));
     return json.decode(res.body);
   }
 
   Future<void> fetchTime() async {
     try {
       final res =
-          await http.get(Uri.parse('http://localhost:5000/api/time'));
+          await http.get(Uri.parse('http://192.168.1.2:5000/api/time'));
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         setState(() {
@@ -222,7 +260,7 @@ Future<void> speakAntrean(dynamic nomor, String loket) async {
   Future<void> fetchDisplay() async {
     try {
       final res =
-          await http.get(Uri.parse('http://localhost:5000/api/display'));
+          await http.get(Uri.parse('http://192.168.1.2:5000/api/display'));
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         setState(() {
@@ -238,8 +276,17 @@ Future<void> speakAntrean(dynamic nomor, String loket) async {
     } catch (_) {}
   }
 
-  Color hexToColor(String hex) =>
-      Color(int.parse(hex.replaceFirst('#', '0xff')));
+  Color hexToColor(String? hexString) {
+  if (hexString == null || hexString.isEmpty) return const Color(0xFF1E88E5); // Default Biru
+  try {
+    final buffer = StringBuffer();
+    if (hexString.length == 6 || hexString.length == 7) buffer.write('ff');
+    buffer.write(hexString.replaceFirst('#', ''));
+    return Color(int.parse(buffer.toString(), radix: 16));
+  } catch (e) {
+    return const Color(0xFF1E88E5);
+  }
+}
 
   // 🔥 ADAPTIVE GRID
   int gridCount(BuildContext context) {
@@ -258,7 +305,7 @@ Future<void> speakAntrean(dynamic nomor, String loket) async {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-
+   
           final profile = snapshot.data!;
           final headerColor = hexToColor(profile['color_palette']);
 
@@ -272,13 +319,15 @@ Future<void> speakAntrean(dynamic nomor, String loket) async {
                   color: headerColor,
                   child: Row(
                     children: [
-                      Image.network(
-                        'http://localhost:5000/static/logo/${profile['gambar_logo']}',
-                        height: 50,
-                        errorBuilder: (_, __, ___) =>
-                            const Icon(Icons.image, color: Colors.white),
-                      ),
-                      const SizedBox(width: 16),
+                      Image.asset(
+  'assets/logopnb.png', 
+  height: 55,        
+  fit: BoxFit.contain,
+  errorBuilder: (context, error, stackTrace) {
+    return const Icon(Icons.business, color: Colors.white, size: 40);
+  },
+),
+                      const SizedBox(width: 15),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -332,63 +381,53 @@ Future<void> speakAntrean(dynamic nomor, String loket) async {
                       children: [
                         // ================= PANEL KIRI =================
                         Expanded(
-                          flex: 3,
+                          flex: 2,
                           child: Column(
+                            mainAxisAlignment: MainAxisAlignment.start, 
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // ===== CURRENT QUEUE =====
-                              currentQueue.isEmpty
-                                  ? const Center(
-                                      child: Padding(
-                                        padding: EdgeInsets.all(40),
-                                        child: Text(
-                                          'BELUM ADA ANTRIAN',
-                                          style: TextStyle(
-                                              fontSize: 20,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.grey),
-                                        ),
-                                      ),
-                                    )
-                                  : AnimatedList(
-  key: _queueListKey,
-  shrinkWrap: true,
-  initialItemCount: currentQueue.length,
-  physics: const NeverScrollableScrollPhysics(),
-  itemBuilder: (context, index, animation) {
-  final item = currentQueue[index];
-
-  return Padding(
-    padding: const EdgeInsets.only(bottom: 12),
-    child: SizeTransition( // Ubah Slide jadi Size agar lebih rapi saat removeItem
-      sizeFactor: animation,
-      child: FadeTransition(
-        opacity: animation,
-        child: AntreanCard(
-          title: 'ANTREAN',
-          nomor: item['nomor'].toString(),
-          loket: item['kode_loket'].toString(),
-          color: hexToColor(item['color']),
-          active: item['nomor'].toString() == activeCalledKode, // 📍 PASS STATE DI SINI
-        ),
-      ),
+                              // ----- AREA ANTREAN AKTIF (ATAS) -----
+                            const Text('ANTREAN SAAT INI', 
+                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
+      
+      // Gunakan Flexible agar GridView bisa menyesuaikan ruang yang ada
+      Container(
+      height: MediaQuery.of(context).size.height * 0.32, // Mengunci tinggi di layar
+      margin: const EdgeInsets.only(bottom: 0),
+      child: currentQueue.isEmpty
+          ? _buildEmptyState('BELUM ADA ANTRIAN')
+          : GridView.builder(
+              padding: EdgeInsets.zero,
+              physics: const NeverScrollableScrollPhysics(), // TV tidak butuh scroll di sini
+              itemCount: currentQueue.length,
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                // Tetap bersebelahan: 2 kolom untuk 2 data, 3 kolom untuk 3 data atau lebih
+                crossAxisCount: currentQueue.length <= 2 ? 2 : 3,
+                crossAxisSpacing: 20,
+                mainAxisSpacing: 0,
+                // Rasio agar kartu tetap proporsional saat mengecil
+                childAspectRatio: currentQueue.length <= 2 ? 1.8 : 1.8, 
+              ),
+              itemBuilder: (context, index) {
+                final item = currentQueue[index];
+                return AntreanCard(
+                  title: 'ANTRIAN',
+                  nomor: item['nomor'].toString(),
+                  loket: item['kode_loket'].toString(),
+                  color: hexToColor(item['warna'] ?? '#1E88E5'),
+                  active: item['nomor'].toString() == activeCalledKode,
+                );
+              },
+            ),
     ),
-  );
-},
-),
 
-
-                              const SizedBox(height: 20),
-
-                              const Text('RIWAYAT ANTRIAN',
-                                  style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold)),
-
-                              const SizedBox(height: 12),
+      const Text('RIWAYAT ANTRIAN',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 12),
 
                               // ===== HISTORY =====
                               Expanded(
+                                flex: 1,
                                 child: historyQueue.isEmpty
                                     ? const Center(
                                         child: Text(
@@ -402,20 +441,20 @@ Future<void> speakAntrean(dynamic nomor, String loket) async {
                                             historyQueue.length,
                                         gridDelegate:
                                             SliverGridDelegateWithFixedCrossAxisCount(
-                                          crossAxisCount:
-                                              gridCount(context),
-                                          crossAxisSpacing: 12,
-                                          mainAxisSpacing: 12,
+                                          crossAxisCount:6,
+                                          crossAxisSpacing: 10,
+                                          mainAxisSpacing: 10,
+                                          childAspectRatio: 1,
                                         ),
                                         itemBuilder:
                                             (context, index) {
                                           final item =
                                               historyQueue[index];
                                           return RiwayatCard(
-                                            item['nomor'].toString(),      // GANTI dari item['kode']
+                                            item['nomor'].toString(),      
                                             item['kode_loket'].toString(),
                                             hexToColor(
-                                                item['color']),
+                                                item['warna']),
                                           );
                                         },
                                       ),
@@ -424,25 +463,33 @@ Future<void> speakAntrean(dynamic nomor, String loket) async {
                           ),
                         ),
 
-                        const SizedBox(width: 16),
+                        const SizedBox(width: 12),
 
                         // ================= PANEL KANAN =================
                         Expanded(
-                          flex: 2,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.black,
-                              borderRadius:
-                                  BorderRadius.circular(16),
-                            ),
-                            child: const Center(
-                              child: Text('VIDEO YOUTUBE',
-                                  style: TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 18)),
-                            ),
-                          ),
-                        ),
+  flex: 1,
+  child: Column(
+    // ✨ INI KUNCINYA: Memaksa semua anak Column mulai dari atas
+    mainAxisAlignment: MainAxisAlignment.start, 
+    children: [
+      Container(
+        decoration: BoxDecoration(
+          color: Colors.black,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        // Gunakan AspectRatio agar video tetap proporsional 16:9
+        child: AspectRatio(
+          aspectRatio: 16 / 9,
+          child: const YoutubePanel(
+            videoUrl: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+          ),
+        ),
+      ),
+      // Jika ingin ada ruang kosong di bawah video agar tidak ditarik ke tengah, 
+      // Anda bisa menambah Spacer() atau biarkan saja karena Column sudah mainAxisAlignment.start
+    ],
+  ),
+),
                       ],
                     ),
                   ),
@@ -451,6 +498,25 @@ Future<void> speakAntrean(dynamic nomor, String loket) async {
             ),
           );
         },
+      ),
+    );
+  }
+  Widget _buildEmptyState(String message) {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.all(40),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: Text(
+          message,
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey,
+          ),
+        ),
       ),
     );
   }
@@ -501,7 +567,7 @@ class _MarqueeTextState extends State<MarqueeText>
 class AntreanCard extends StatelessWidget {
   final String title, nomor, loket;
   final Color color;
-  final bool active; // 📍 Tambah ini
+  final bool active;
 
   const AntreanCard({
     super.key,
@@ -509,69 +575,179 @@ class AntreanCard extends StatelessWidget {
     required this.nomor,
     required this.loket,
     required this.color,
-    this.active = false, // 📍 Default false
+    this.active = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer( // Pakai AnimatedContainer agar transisi glow halus
+    return AnimatedContainer(
       duration: const Duration(milliseconds: 500),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 10),
       decoration: BoxDecoration(
-        color: active ? color.withOpacity(0.9) : color,
-        borderRadius: BorderRadius.circular(16),
+        color: color,
+        borderRadius: BorderRadius.circular(20),
+        border: active
+            ? Border.all(color: Colors.yellowAccent, width: 8)
+            : Border.all(color: Colors.white24, width: 1),
         boxShadow: active
             ? [
                 BoxShadow(
-                  color: Colors.yellow.withOpacity(0.8),
-                  blurRadius: 20,
-                  spreadRadius: 4,
+                  color: Colors.yellow.withOpacity(0.6),
+                  blurRadius: 40,
+                  spreadRadius: 8,
                 )
               ]
-            : [],
+            : [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 15,
+                  offset: const Offset(0, 8),
+                )
+              ],
       ),
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(color: Colors.white70)),
-          const SizedBox(height: 10),
-          Text(nomor,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 36,
-                  fontWeight: FontWeight.bold)),
+          const Text(
+            'ANTRIAN',
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 15,
+              letterSpacing: 1,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text(loket, style: const TextStyle(color: Colors.white70)),
+
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.contain,
+              child: Text(
+                nomor,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 65,
+                  fontWeight: FontWeight.bold,
+                  shadows: [
+                    Shadow(
+                      color: Colors.black26,
+                      blurRadius: 10,
+                      offset: Offset(2, 2),
+                    )
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 2),
+          Text(
+            'LOKET $loket',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
+
 class RiwayatCard extends StatelessWidget {
   final String nomor, loket;
   final Color color;
+  
   const RiwayatCard(this.nomor, this.loket, this.color, {super.key});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration:
-          BoxDecoration(color: color, borderRadius: BorderRadius.circular(14)),
+      decoration: BoxDecoration(
+        // Gunakan opacity sedikit agar riwayat tidak lebih mencolok dari antrean aktif
+        color: color.withOpacity(0.8), 
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          )
+        ],
+      ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Text('ANTREAN', style: TextStyle(color: Colors.white70)),
-          const SizedBox(height: 6),
-          Text(nomor,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold)),
+          const Text('ANTREAN', 
+            style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
-          Text(loket, style: const TextStyle(color: Colors.white70)),
+          
+          // Menggunakan FittedBox agar nomor selalu muat di kotak kecil
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.contain,
+              child: Text(nomor,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold)),
+            ),
+          ),
+          
+          const SizedBox(height: 4),
+          // Menambahkan teks 'LOKET' agar lebih informatif
+          Text('LOKET $loket', 
+            style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
         ],
       ),
     );
+  }
+}
+
+class YoutubePanel extends StatefulWidget {
+  final String videoUrl;
+  const YoutubePanel({super.key, required this.videoUrl});
+
+  @override
+  State<YoutubePanel> createState() => _YoutubePanelState();
+}
+
+class _YoutubePanelState extends State<YoutubePanel> {
+  late YoutubePlayerController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    final videoId = YoutubePlayer.convertUrlToId(widget.videoUrl);
+
+    _controller = YoutubePlayerController(
+      initialVideoId: videoId ?? '',
+      flags: const YoutubePlayerFlags(
+        autoPlay: true,
+        mute: true,      // Mute agar tidak mengganggu suara panggil antrean
+        loop: true,      // Putar terus menerus
+        isLive: false,
+        forceHD: true,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: YoutubePlayer(
+        controller: _controller,
+        showVideoProgressIndicator: true,
+        progressIndicatorColor: Colors.blueAccent,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 }

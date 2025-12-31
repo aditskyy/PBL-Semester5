@@ -15,11 +15,11 @@ class Profile {
 
   factory Profile.fromJson(Map<String, dynamic> json) {
     return Profile(
-      namaInstansi: json['nama_instansi'],
-      alamat: json['alamat'],
-      telp: json['telp'],
-      gambarLogo: json['gambar_logo'],
-      colorPalette: json['color_palette'],
+      namaInstansi: json['nama_instansi'] ?? '',
+      alamat: json['alamat'] ?? '',
+      telp: json['telp'] ?? '',
+      gambarLogo: json['gambar_logo'] ?? '',
+      colorPalette: json['color_palette'] ?? '#000000',
     );
   }
 }

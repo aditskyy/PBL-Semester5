@@ -53,6 +53,8 @@ class Operator extends ResourceController
     }
 
     $antrian = $this->antrianModel->find($idAntrian);
+    // 🎨 Ambil data loket untuk mendapatkan kolom 'warna'
+    $loket = $this->loketModel->where('kode_loket', $kodeLoket)->first();
 
     $this->antrianModel->update($idAntrian, [
         'status'        => 'Dipanggil',
@@ -61,11 +63,11 @@ class Operator extends ResourceController
         'waktu_panggil' => date('Y-m-d H:i:s')
     ]);
 
-    // 🔥 SOCKET
+    // 🔥 SOCKET (Ditambah 'color' dan format nomor)
     $this->emitSocket('panggil_antrean', [
-        'nomor'      => $antrian['nomor'],
+        'nomor'      => $antrian['kode_jenis'] . str_pad($antrian['nomor'], 3, '0', STR_PAD_LEFT),
         'kode_loket' => $kodeLoket,
-        'kode_jenis' => $antrian['kode_jenis']
+        'warna'      => $loket['warna'] ?? '#1E88E5' // Kirim warna dinamis
     ]);
 
     return $this->respond(['status' => 'success', 'message' => 'Antrian dipanggil.']);
@@ -79,6 +81,8 @@ class Operator extends ResourceController
     $kodeJenis = $this->request->getPost('kode_jenis');
     $kodeLoket = $this->request->getPost('kode_loket');
     $userId = session()->get('user_id');
+
+    $loket = $this->loketModel->where('kode_loket', $kodeLoket)->first();
 
     // Selesaikan yang lama
     $this->antrianModel
@@ -105,9 +109,10 @@ class Operator extends ResourceController
 
     // 🔥 SOCKET (FIELD VALID)
     $this->emitSocket('panggil_antrean', [
-        'nomor'      => $antrian['nomor'],
+        'nomor'      => $antrian['kode_jenis'] . str_pad($antrian['nomor'], 3, '0', STR_PAD_LEFT),
         'kode_loket' => $kodeLoket,
-        'kode_jenis' => $kodeJenis
+        'kode_jenis' => $kodeJenis,
+        'warna'      => $loket['warna'] ?? '#1E88E5'
     ]);
 
     return $this->respond(['status' => 'success', 'data' => $antrian]);
@@ -120,6 +125,7 @@ class Operator extends ResourceController
 {
     $idAntrian = $this->request->getPost('id_antrian');
     $antrian = $this->antrianModel->find($idAntrian);
+    $loket = $this->loketModel->where('kode_loket', $antrian['kode_loket'])->first();
 
     if (!$antrian) {
         return $this->failNotFound('Antrian tidak ditemukan.');
@@ -127,8 +133,9 @@ class Operator extends ResourceController
 
     // 🔥 SOCKET 
     $this->emitSocket('panggil_ulang', [
-        'nomor'      => $antrian['nomor'],
-        'kode_loket' => $antrian['kode_loket']
+        'nomor'      => $antrian['kode_jenis'] . str_pad($antrian['nomor'], 3, '0', STR_PAD_LEFT),
+        'kode_loket' => $antrian['kode_loket'],
+        'warna'      => $loket['warna'] ?? '#1E88E5'
     ]);
 
     return $this->respond([
@@ -144,40 +151,24 @@ class Operator extends ResourceController
       public function selesai()
 {
     $idAntrian = $this->request->getPost('id_antrian');
-    $userId = session()->get('user_id');
-
     if (!$idAntrian) {
         return $this->respond(['status' => 'error', 'message' => 'ID antrian tidak ditemukan'], 400);
     }
 
     $antrian = $this->antrianModel->find($idAntrian);
-    if (!$antrian) {
-        return $this->respond(['status' => 'error', 'message' => 'Data antrian tidak valid'], 404);
-    }
-
-    // Update ke selesai
+    
     $this->antrianModel->update($idAntrian, [
         'status' => 'Selesai',
         'waktu_selesai' => date('Y-m-d H:i:s')
     ]);
 
-    // Tambahkan LOG
-    $this->logModel->insert([
-        'id_antrian' => $idAntrian,
-        'user_id'    => $userId,
-        'aksi'       => 'SELESAI',
-        'waktu'      => date('Y-m-d H:i:s')
-    ]);
-
-    // 🔥 SOCKET 
+    // 🔥 SOCKET (Sertakan kode_loket agar Flutter tahu kotak mana yang harus dihapus)
     $this->emitSocket('selesai_antrean', [
-    'nomor' => $antrian['nomor']
-     ]);
-
-    return $this->respond([
-        'status' => 'success',
-        'message' => 'Antrian berhasil diselesaikan.'
+        'nomor'      => $antrian['kode_jenis'] . str_pad($antrian['nomor'], 3, '0', STR_PAD_LEFT),
+        'kode_loket' => $antrian['kode_loket']
     ]);
+
+    return $this->respond(['status' => 'success', 'message' => 'Antrian selesai.']);
 }
 
 

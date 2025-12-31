@@ -11,6 +11,22 @@ use CodeIgniter\Controller;
 
 class OperatorController extends Controller
 {
+
+    private function emitSocket($event, $data)
+    {
+        $client = \Config\Services::curlrequest();
+        try {
+            $client->post('http://192.168.1.7:5000/api/emit', [
+                'json' => [
+                    'event' => $event,
+                    'data'  => $data
+                ],
+                'timeout' => 2
+            ]);
+        } catch (\Exception $e) {
+            log_message('error', 'Socket emit gagal: ' . $e->getMessage());
+        }
+    }
     
 public function auth()
 {
@@ -142,18 +158,21 @@ public function panggilSelanjutnya()
 {
     $session = session();
 
-    if (!$session->get('logged_in') || !$session->get('kode_jenis')) {
+    // Cek login dan kelengkapan session operator
+    if (!$session->get('logged_in') || !$session->get('kode_jenis') || !$session->get('kode_loket')) {
         return redirect()->to('/operator');
     }
 
     $kodeJenis = $session->get('kode_jenis');
+    $kodeLoket = $session->get('kode_loket'); // Pastikan kode_loket diambil dari session
     $userId    = $session->get('user_id');
 
     $antrianModel = new \App\Models\AntrianModel();
     $logModel     = new \App\Models\LogAntrianModel();
+    $loketModel   = new \App\Models\LoketModel();
 
-    // Tandai yang sedang dipanggil jadi selesai
-    $antrianModel->where('kode_jenis', $kodeJenis)
+    // 1. Tandai antrian yang sedang dipanggil di loket ini menjadi 'Selesai'
+    $antrianModel->where('kode_loket', $kodeLoket)
                  ->where('status', 'Dipanggil')
                  ->set([
                      'status' => 'Selesai',
@@ -161,7 +180,7 @@ public function panggilSelanjutnya()
                  ])
                  ->update();
 
-    // Ambil antrian berikut
+    // 2. Cari antrian berikutnya berdasarkan jenis layanan yang statusnya masih 'Menunggu'
     $antrianBerikut = $antrianModel
         ->where('kode_jenis', $kodeJenis)
         ->where('status', 'Menunggu')
@@ -169,66 +188,93 @@ public function panggilSelanjutnya()
         ->first();
 
     if ($antrianBerikut) {
-
-        // Update jadi dipanggil
+        // 3. Update antrian tersebut menjadi status 'Dipanggil' dan arahkan ke loket operator
         $antrianModel->update($antrianBerikut['id_antrian'], [
-            'status' => 'Dipanggil',
+            'status'     => 'Dipanggil',
+            'kode_loket' => $kodeLoket,
             'updated_at' => date('Y-m-d H:i:s')
         ]);
 
-        // Insert ke log
+        // 4. Catat ke dalam Log Antrian
         $logModel->insert([
             'id_antrian' => $antrianBerikut['id_antrian'],
             'aksi'       => 'PANGGIL',
             'user_id'    => $userId,
             'waktu'      => date('Y-m-d H:i:s')
         ]);
+
+        // 5. 🎨 Ambil data warna dari tabel loket secara dinamis
+        $dataLoket = $loketModel->where('kode_loket', $kodeLoket)->first();
+
+        // 6. 🔥 Kirim data ke WebSocket (Flask) agar tampilan TV berubah secara Real-time
+        $this->emitSocket('panggil_antrean', [
+            'nomor'      => $antrianBerikut['kode_jenis'] . str_pad($antrianBerikut['nomor'], 3, '0', STR_PAD_LEFT),
+            'kode_loket' => $kodeLoket,
+            'color'      => $dataLoket['warna'] ?? '#1E88E5' // Mengirim warna dari DB
+        ]);
     }
 
     return redirect()->to('/operator/dashboard');
 }
-
 
 public function panggilUlang()
-{
-    // di sini bisa dipakai buat memutar ulang suara panggilan antrian (kalau ada)
-    return redirect()->to('/operator/dashboard');
-}
+    {
+        $session = session();
+        $kodeJenis = $session->get('kode_jenis');
+        $kodeLoket = $session->get('kode_loket');
 
-public function selesai()
-{
-    $session = session();
-    $kodeJenis = $session->get('kode_jenis');
-    $userId = $session->get('user_id');
+        $antrian = $this->antrianModel
+            ->where('kode_jenis', $kodeJenis)
+            ->where('status', 'Dipanggil')
+            ->where('kode_loket', $kodeLoket)
+            ->first();
 
-    $antrianModel = new \App\Models\AntrianModel();
-    $logModel = new \App\Models\LogAntrianModel();
+        if ($antrian) {
+            // 🔥 SOCKET EMIT RECALL
+            $this->emitSocket('panggil_ulang', [
+                'nomor'      => $antrian['kode_jenis'] . str_pad($antrian['nomor'], 3, '0', STR_PAD_LEFT),
+                'kode_loket' => $kodeLoket
+            ]);
+        }
 
-    // Ambil antrian yang sedang dipanggil
-    $antrianDipanggil = $antrianModel
-        ->where('kode_jenis', $kodeJenis)
-        ->where('status', 'Dipanggil')
-        ->first();
-
-    if ($antrianDipanggil) {
-
-        // Update jadi selesai
-        $antrianModel->update($antrianDipanggil['id_antrian'], [
-            'status' => 'Selesai',
-            'updated_at' => date('Y-m-d H:i:s')
-        ]);
-
-        // Log
-        $logModel->insert([
-            'id_antrian' => $antrianDipanggil['id_antrian'],
-            'aksi'       => 'SELESAI',
-            'user_id'    => $userId,
-            'waktu'      => date('Y-m-d H:i:s')
-        ]);
+        return redirect()->to('/operator/dashboard');
     }
 
-    return redirect()->to('/operator/dashboard');
-}
+public function selesai()
+    {
+        $session = session();
+        $kodeJenis = $session->get('kode_jenis');
+        $kodeLoket = $session->get('kode_loket');
+        $userId = $session->get('user_id');
+
+        $antrianDipanggil = $this->antrianModel
+            ->where('kode_jenis', $kodeJenis)
+            ->where('status', 'Dipanggil')
+            ->where('kode_loket', $kodeLoket)
+            ->first();
+
+        if ($antrianDipanggil) {
+            $this->antrianModel->update($antrianDipanggil['id_antrian'], [
+                'status' => 'Selesai',
+                'updated_at' => date('Y-m-d H:i:s')
+            ]);
+
+            $this->logModel->insert([
+                'id_antrian' => $antrianDipanggil['id_antrian'],
+                'aksi'       => 'SELESAI',
+                'user_id'    => $userId,
+                'waktu'      => date('Y-m-d H:i:s')
+            ]);
+
+            // 🔥 SOCKET EMIT
+            $this->emitSocket('selesai_antrean', [
+                'nomor'      => $antrianDipanggil['kode_jenis'] . str_pad($antrianDipanggil['nomor'], 3, '0', STR_PAD_LEFT),
+                'kode_loket' => $kodeLoket
+            ]);
+        }
+
+        return redirect()->to('/operator/dashboard');
+    }
 
     public function resetAntrian()
     {
