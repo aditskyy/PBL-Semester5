@@ -2,27 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 class TiketPage extends StatelessWidget {
-  final String nomorAntrean;
-  final String kodeJenis;
+  final String nomor;     // Sesuai nama kolom di DB Anda
+  final String namaLoket; // Nama tampilan (Teller/CS/Kredit)
 
   const TiketPage({
     Key? key,
-    required this.nomorAntrean,
-    required this.kodeJenis,
+    required this.nomor,
+    required this.namaLoket,
   }) : super(key: key);
-
-  String getNamaLoket() {
-    switch (kodeJenis) {
-      case 'A':
-        return "TELLER";
-      case 'B':
-        return "CUSTOMER SERVICE";
-      case 'C':
-        return "KREDIT";
-      default:
-        return "LOKET TIDAK DIKETAHUI";
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -30,52 +17,28 @@ class TiketPage extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: Colors.grey[200],
-      appBar: AppBar(backgroundColor: Colors.blueAccent, centerTitle: true),
+      appBar: AppBar(title: const Text("Tiket Antrean"), backgroundColor: Colors.blueAccent),
       body: Center(
         child: Card(
           elevation: 5,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
           child: Container(
-            width: 280,
+            width: 300,
             padding: const EdgeInsets.all(20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
-                  "BHUTKALA PROJRCT",
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const Divider(thickness: 1),
-                const SizedBox(height: 10),
-                const Text("Nomor Antrean Anda"),
-                const SizedBox(height: 5),
-                Text(
-                  nomorAntrean,
-                  style: const TextStyle(
-                    fontSize: 48,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(getNamaLoket(), style: const TextStyle(fontSize: 18)),
-                const Divider(thickness: 1),
-                Text("Waktu Ambil: $waktu"),
+                const Text("BHUTKALA PROJECT", style: TextStyle(fontWeight: FontWeight.bold)),
+                const Divider(),
+                const Text("Nomor Antrean Anda:"),
+                Text(nomor, style: const TextStyle(fontSize: 60, fontWeight: FontWeight.bold)),
+                Text(namaLoket, style: const TextStyle(fontSize: 20, color: Colors.blue)),
+                const Divider(),
+                Text(waktu),
                 const SizedBox(height: 20),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.print),
-                  label: const Text("Cetak Tiket"),
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          "Cetak tiket masih dalam pengembangan 🔖",
-                        ),
-                      ),
-                    );
-                  },
-                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("KEMBALI"),
+                )
               ],
             ),
           ),

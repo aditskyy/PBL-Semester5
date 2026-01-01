@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:user_ambil/services/service.dart';
+import 'package:user_ambil/pages/tiket_page.dart';
 
 class AmbilAntreanPage extends StatefulWidget {
   const AmbilAntreanPage({Key? key}) : super(key: key);
@@ -10,14 +11,20 @@ class AmbilAntreanPage extends StatefulWidget {
 
 class _AmbilAntreanPageState extends State<AmbilAntreanPage> {
   String? selectedLoket;
-  String? nomorAntrean;
+  String? selectedNamaLoket; // Tambahan: Untuk menyimpan nama asli loket (misal: "Teller-01")
   bool isLoading = false;
+  
+  late Future<List<dynamic>> _loketFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _loketFuture = ApiService.getDaftarLoket();
+  }
 
   Future<void> ambilAntrean() async {
     if (selectedLoket == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Pilih loket terlebih dahulu")),
-      );
+      _showSnackBar("Pilih loket terlebih dahulu");
       return;
     }
 
@@ -25,16 +32,34 @@ class _AmbilAntreanPageState extends State<AmbilAntreanPage> {
 
     try {
       final response = await ApiService.ambilAntrean(selectedLoket!);
-      setState(() {
-        nomorAntrean = response['nomor_antrean'];
-      });
+
+      if (response['success'] == true) {
+        if (!mounted) return;
+
+        // NAVIGASI DENGAN PARAMETER YANG SUDAH DISESUAIKAN
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => TiketPage(
+              nomor: response['nomor'].toString(), // Sesuai kolom 'nomor' di database
+              namaLoket: selectedNamaLoket ?? "LOKET", // Nama asli dari tabel loket
+            ),
+          ),
+        );
+      } else {
+        _showSnackBar(response['message'] ?? "Gagal mengambil antrean");
+      }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Gagal mengambil antrean: $e")));
+      _showSnackBar("Terjadi kesalahan koneksi: $e");
     } finally {
-      setState(() => isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
+  }
+
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   @override
@@ -45,115 +70,83 @@ class _AmbilAntreanPageState extends State<AmbilAntreanPage> {
         backgroundColor: Colors.blueAccent,
         title: const Text("Ambil Nomor Antrean"),
         centerTitle: true,
+        elevation: 0,
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(20.0),
         child: Column(
           children: [
+            const Icon(Icons.touch_app, size: 80, color: Colors.blueAccent),
+            const SizedBox(height: 10),
             const Text(
-              "Pilih Loket Anda:",
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 20),
-            ToggleButtons(
-              borderRadius: BorderRadius.circular(10),
-              isSelected: [
-                selectedLoket == 'A',
-                selectedLoket == 'B',
-                selectedLoket == 'C',
-              ],
-              onPressed: (index) {
-                setState(() {
-                  if (index == 0) selectedLoket = 'A';
-                  if (index == 1) selectedLoket = 'B';
-                  if (index == 2) selectedLoket = 'C';
-                });
-              },
-              children: const [
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 20),
-                  child: Text("TELLER"),
-                ),
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 20),
-                  child: Text("CS"),
-                ),
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 20),
-                  child: Text("KREDIT"),
-                ),
-              ],
+              "Silahkan Pilih Layanan",
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 30),
-            ElevatedButton.icon(
-              onPressed: isLoading ? null : ambilAntrean,
-              icon: const Icon(Icons.confirmation_number),
-              label:
-                  isLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text("Ambil Nomor"),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 40,
-                  vertical: 15,
-                ),
-                backgroundColor: Colors.blueAccent,
-                textStyle: const TextStyle(fontSize: 18),
-              ),
+
+            FutureBuilder<List<dynamic>>(
+              future: _loketFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                } else if (snapshot.hasError || !snapshot.hasData || snapshot.data!.isEmpty) {
+                  return const Text("Gagal memuat daftar loket. Cek koneksi server.");
+                }
+
+                return Column(
+                  children: [
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      alignment: WrapAlignment.center,
+                      children: snapshot.data!.map((loket) {
+                        final kode = loket['kode_jenis'];
+                        final nama = loket['nama_loket']; // "Teller-01", "CS-01", dsb
+                        final isSelected = selectedLoket == kode;
+
+                        return ChoiceChip(
+                          label: Text(nama),
+                          selected: isSelected,
+                          selectedColor: Colors.blueAccent,
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.white : Colors.black,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          onSelected: (bool selected) {
+                            setState(() {
+                              selectedLoket = selected ? kode : null;
+                              selectedNamaLoket = selected ? nama : null; // Simpan nama aslinya
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 40),
+                    
+                    SizedBox(
+                      width: double.infinity,
+                      height: 55,
+                      child: ElevatedButton.icon(
+                        onPressed: isLoading ? null : ambilAntrean,
+                        icon: isLoading 
+                          ? const SizedBox() 
+                          : const Icon(Icons.confirmation_number, color: Colors.white),
+                        label: isLoading
+                            ? const CircularProgressIndicator(color: Colors.white)
+                            : const Text("AMBIL NOMOR ANTREAN", 
+                                style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blueAccent,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
-            const SizedBox(height: 40),
-            if (nomorAntrean != null)
-              Card(
-                elevation: 5,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  width: 250,
-                  child: Column(
-                    children: [
-                      const Text(
-                        "Nomor Antrean Anda",
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        nomorAntrean!,
-                        style: const TextStyle(
-                          fontSize: 48,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const Divider(),
-                      Text(
-                        selectedLoket == 'A'
-                            ? "Loket Teller"
-                            : selectedLoket == 'B'
-                            ? "Loket Customer Service"
-                            : "Loket Kredit",
-                        style: const TextStyle(fontSize: 16),
-                      ),
-                      const SizedBox(height: 10),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.print),
-                        label: const Text("Cetak Tiket"),
-                        onPressed: () {
-                          // TODO: implementasi print kecil
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text("Fitur cetak segera aktif 🔖"),
-                            ),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
           ],
         ),
       ),
