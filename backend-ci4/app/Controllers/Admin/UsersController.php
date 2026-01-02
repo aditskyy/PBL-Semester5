@@ -49,7 +49,7 @@ class UsersController extends BaseController
 
         $this->userModel->save([
             'username' => $this->request->getPost('username'),
-            'password' => $hashed,
+            'password' => password_hash($this->request->getPost('password'), PASSWORD_BCRYPT),
             'role'     => $this->request->getPost('role')
         ]);
 

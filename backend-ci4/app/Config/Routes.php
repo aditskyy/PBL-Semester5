@@ -17,8 +17,11 @@ $routes->post('/api/antrian/selesai', 'AntrianController::selesai');
 
 // ==== LOGIN =====
 $routes->post('api/login', 'Api\Auth::login');
+$routes->post('api/register', 'Api\Auth::register');
 $routes->get('/login', 'UserController::loginForm');
 $routes->post('/login/process', 'UserController::loginProcess');
+$routes->get('/register', 'UserController::registerForm');
+$routes->post('/register/process', 'UserController::registerProcess');
 
 
 // // ==== LOKET ====
@@ -38,7 +41,7 @@ $routes->group('api/operator', function($routes) {
 // ==== OPERATOR (untuk tampilan web) ====
 $routes->post('/operator/auth', 'OperatorController::auth');
 $routes->get('/operator/dashboard', 'OperatorController::dashboard');
-$routes->get('/operator/logout', 'OperatorController::logout');
+$routes->get('/operator/logout', 'OperatorController::logoutOperator');
 $routes->post('operator/setLoket', 'OperatorController::setLoket');
 $routes->get('operator', 'OperatorController::index');
 $routes->get('operator/select', 'OperatorController::select');

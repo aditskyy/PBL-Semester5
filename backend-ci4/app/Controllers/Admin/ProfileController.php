@@ -14,12 +14,10 @@ class ProfileController extends BaseController
         $this->profileModel = new ProfileModel();
     }
 
-    // INDEX
     public function index()
     {
         $profile = $this->profileModel->first();
 
-        // Kalau belum ada profile → redirect ke create
         if (!$profile) {
             return redirect()->to('admin/profile/create');
         }
@@ -29,18 +27,14 @@ class ProfileController extends BaseController
         ]);
     }
 
-    // CREATE FORM
     public function create()
     {
-        // Kalau sudah ada profile → gak boleh create lagi
         if ($this->profileModel->countAll() > 0) {
             return redirect()->to('admin/profile');
         }
-
         return view('admin/profile/create');
     }
 
-    // STORE
     public function store()
     {
         $data = [
@@ -50,33 +44,19 @@ class ProfileController extends BaseController
             'color_palette' => $this->request->getPost('color_palette'),
         ];
 
-        $file = $this->request->getFile('gambar_logo');
-        if ($file && $file->isValid()) {
-            $newName = $file->getRandomName();
-            $file->move(ROOTPATH . 'public/uploads/logo', $newName);
-            $data['gambar_logo'] = $newName;
-        }
-
         $this->profileModel->insert($data);
-
         return redirect()->to('admin/profile')->with('success', 'Profile berhasil dibuat');
     }
 
-    // EDIT FORM
     public function edit($id)
     {
         $profile = $this->profileModel->find($id);
-
         if (!$profile) {
             return redirect()->to('admin/profile');
         }
-
-        return view('admin/profile/edit', [
-            'profile' => $profile
-        ]);
+        return view('admin/profile/edit', ['profile' => $profile]);
     }
 
-    // UPDATE
     public function update($id)
     {
         $data = [
@@ -86,15 +66,7 @@ class ProfileController extends BaseController
             'color_palette' => $this->request->getPost('color_palette'),
         ];
 
-        $file = $this->request->getFile('gambar_logo');
-        if ($file && $file->isValid() && !$file->hasMoved()) {
-            $newName = $file->getRandomName();
-            $file->move('uploads/logo', $newName);
-            $data['gambar_logo'] = $newName;
-        }
-
         $this->profileModel->update($id, $data);
-
         return redirect()->to('admin/profile')->with('success', 'Profile berhasil diperbarui');
     }
 }

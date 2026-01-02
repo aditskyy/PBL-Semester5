@@ -42,6 +42,9 @@
       </div>
       <button type="submit" class="btn btn-primary w-100">Masuk</button>
     </form>
+    <div class="text-center mt-3">
+        <p class="mb-0">Belum punya akun? <a href="<?= base_url('/register') ?>" class="text-decoration-none">Daftar Sekarang</a></p>
+    </div>
   </div>
 </body>
 </html>

@@ -38,17 +38,26 @@ public function auth()
 
     $user = $userModel->where('username', $username)->first();
 
-    if ($user && $user['password'] === $password) {
+    // PERBAIKAN: Gunakan password_verify untuk mengecek hash
+    if ($user && password_verify($password, $user['password'])) {
 
         // Simpan ke session
         $session->set([
             'logged_in' => true,
-            'username' => $user['username'],
-            'user_id' => $user['id'],  
-            //'kode_jenis' => $user['kode_jenis'], 
+            'username'  => $user['username'],
+            'user_id'   => $user['id'],
+            'role'      => $user['role'] // Tambahkan role untuk filter akses
         ]);
 
-         return redirect()->to('/operator/select');
+        // 📝 LOG: Tambahkan pencatatan LOGIN di sini agar konsisten
+        $db = \Config\Database::connect();
+        $db->table('log_antrian')->insert([
+            'user_id' => $user['id'],
+            'aksi'    => 'LOGIN',
+            'waktu'   => date('Y-m-d H:i:s')
+        ]);
+
+        return redirect()->to('/operator/select');
     }
 
     $session->setFlashdata('error', 'Username atau password salah.');
@@ -112,18 +121,26 @@ public function dashboard()
 {
     $session = session();
 
-    // Cek apakah operator sudah memilih jenis & loket
+    // 1. Cek login
     if (!$session->get('logged_in')) {
         return redirect()->to('/operator');
     }
 
-    $kodeJenis = $session->get('kode_jenis');
-    $kodeLoket = $session->get('kode_loket');
+    // 2. PERUBAHAN UTAMA: Ambil dari URL (?jenis=A&loket=A-01) 
+    // Jika tidak ada di URL, baru ambil dari Session (fallback)
+    $kodeJenis = $this->request->getGet('jenis') ?: $session->get('kode_jenis');
+    $kodeLoket = $this->request->getGet('loket') ?: $session->get('kode_loket');
+
+    // Tambahan validasi jika keduanya kosong
+    if (!$kodeJenis || !$kodeLoket) {
+        return redirect()->to('/operator/select')->with('error', 'Silakan pilih jenis layanan dan loket.');
+    }
 
     $antrianModel = new \App\Models\AntrianModel();
     $loketModel = new \App\Models\LoketModel();
+    $detailLoket = $loketModel->where('kode_loket', $kodeLoket)->first();
 
-    // Ambil antrian sedang dipanggil (status = Dipanggil)
+    // 3. Ambil antrian sedang dipanggil (Berdasarkan parameter yang ditangkap di atas)
     $antrianSekarang = $antrianModel
         ->where('kode_jenis', $kodeJenis)
         ->where('kode_loket', $kodeLoket)
@@ -131,24 +148,24 @@ public function dashboard()
         ->orderBy('id_antrian', 'DESC')
         ->first();
 
-    // Ambil antrian berikutnya (status = Menunggu)
+    // 4. Ambil antrian berikutnya (Berdasarkan parameter yang ditangkap di atas)
     $antrianBerikut = $antrianModel
-    ->where('kode_jenis', $kodeJenis)
-    ->where('kode_loket', $kodeLoket)
-    ->where('status', 'Menunggu')
-    ->orderBy('id_antrian', 'ASC')
-    ->first();
+        ->where('kode_jenis', $kodeJenis)
+        ->where('status', 'Menunggu')
+        ->orderBy('id_antrian', 'ASC')
+        ->first();
 
-    // Loket aktif sesuai jenis operator
+    // 5. Loket aktif sesuai jenis
     $loket = $loketModel
         ->where('kode_jenis', $kodeJenis)
         ->findAll();
 
-    // Kirim data ke view
+    // 6. Kirim data ke view
     return view('/operator/operator_dashboard', [
+        'nama_loket'        => $detailLoket['nama_loket'] ?? 'Loket Tidak Terdaftar', 
         'kode_jenis'        => $kodeJenis,
         'kode_loket'        => $kodeLoket,
-        'loket'             => $loket,
+        'loket'             => $loket, // <--- SESUAIKAN DI SINI (Ganti $semuaLoket jadi $loket)
         'antrianSekarang'   => $antrianSekarang,
         'antrianBerikut'    => $antrianBerikut,
     ]);
@@ -158,29 +175,42 @@ public function panggilSelanjutnya()
 {
     $session = session();
 
-    // Cek login dan kelengkapan session operator
-    if (!$session->get('logged_in') || !$session->get('kode_jenis') || !$session->get('kode_loket')) {
-        return redirect()->to('/operator');
-    }
-
-    $kodeJenis = $session->get('kode_jenis');
-    $kodeLoket = $session->get('kode_loket'); // Pastikan kode_loket diambil dari session
+    // 1. Prioritas ambil dari POST agar identitas tab tidak tertukar
+    $kodeJenis = $this->request->getPost('kode_jenis') ?: $session->get('kode_jenis');
+    $kodeLoket = $this->request->getPost('kode_loket') ?: $session->get('kode_loket');
     $userId    = $session->get('user_id');
+
+    // Cek login
+    if (!$userId) {
+        return $this->response->setJSON(['status' => 'error', 'message' => 'Sesi habis, silakan login kembali'], 401);
+    }
 
     $antrianModel = new \App\Models\AntrianModel();
     $logModel     = new \App\Models\LogAntrianModel();
     $loketModel   = new \App\Models\LoketModel();
 
-    // 1. Tandai antrian yang sedang dipanggil di loket ini menjadi 'Selesai'
-    $antrianModel->where('kode_loket', $kodeLoket)
-                 ->where('status', 'Dipanggil')
-                 ->set([
-                     'status' => 'Selesai',
-                     'updated_at' => date('Y-m-d H:i:s')
-                 ])
-                 ->update();
+    // 2. Cari antrean yang sedang 'Dipanggil' di loket ini untuk diselesaikan
+    $antrianLama = $antrianModel->where('kode_loket', $kodeLoket)
+                                ->where('status', 'Dipanggil')
+                                ->first();
 
-    // 2. Cari antrian berikutnya berdasarkan jenis layanan yang statusnya masih 'Menunggu'
+    if ($antrianLama) {
+        // Update jadi Selesai
+        $antrianModel->update($antrianLama['id_antrian'], [
+            'status'     => 'Selesai',
+            'updated_at' => date('Y-m-d H:i:s')
+        ]);
+
+        // 📝 LOG: Catat antrean sebelumnya telah SELESAI
+        $logModel->insert([
+            'id_antrian' => $antrianLama['id_antrian'],
+            'aksi'       => 'SELESAI',
+            'user_id'    => $userId,
+            'waktu'      => date('Y-m-d H:i:s')
+        ]);
+    }
+
+    // 3. Cari antrean berikutnya (Menunggu)
     $antrianBerikut = $antrianModel
         ->where('kode_jenis', $kodeJenis)
         ->where('status', 'Menunggu')
@@ -188,14 +218,14 @@ public function panggilSelanjutnya()
         ->first();
 
     if ($antrianBerikut) {
-        // 3. Update antrian tersebut menjadi status 'Dipanggil' dan arahkan ke loket operator
+        // Update jadi Dipanggil
         $antrianModel->update($antrianBerikut['id_antrian'], [
             'status'     => 'Dipanggil',
             'kode_loket' => $kodeLoket,
             'updated_at' => date('Y-m-d H:i:s')
         ]);
 
-        // 4. Catat ke dalam Log Antrian
+        // 📝 LOG: Catat antrean baru sedang DIPANGGIL
         $logModel->insert([
             'id_antrian' => $antrianBerikut['id_antrian'],
             'aksi'       => 'PANGGIL',
@@ -203,78 +233,95 @@ public function panggilSelanjutnya()
             'waktu'      => date('Y-m-d H:i:s')
         ]);
 
-        // 5. 🎨 Ambil data warna dari tabel loket secara dinamis
+        // Ambil data warna loket
         $dataLoket = $loketModel->where('kode_loket', $kodeLoket)->first();
 
-        // 6. 🔥 Kirim data ke WebSocket (Flask) agar tampilan TV berubah secara Real-time
+        // 🔥 Socket Emit ke Flask/TV
         $this->emitSocket('panggil_antrean', [
             'nomor'      => $antrianBerikut['kode_jenis'] . str_pad($antrianBerikut['nomor'], 3, '0', STR_PAD_LEFT),
             'kode_loket' => $kodeLoket,
-            'color'      => $dataLoket['warna'] ?? '#1E88E5' // Mengirim warna dari DB
+            'color'      => $dataLoket['warna'] ?? '#1E88E5'
         ]);
+
+        return $this->response->setJSON(['status' => 'success', 'data' => $antrianBerikut]);
     }
 
-    return redirect()->to('/operator/dashboard');
+    return $this->response->setJSON(['status' => 'error', 'message' => 'Antrean sudah habis']);
 }
 
 public function panggilUlang()
-    {
-        $session = session();
-        $kodeJenis = $session->get('kode_jenis');
-        $kodeLoket = $session->get('kode_loket');
+{
+    $session = session();
+    // Gunakan POST agar identitas tab tidak tertukar
+    $kodeJenis = $this->request->getPost('kode_jenis') ?: $session->get('kode_jenis');
+    $kodeLoket = $this->request->getPost('kode_loket') ?: $session->get('kode_loket');
+    $userId    = $session->get('user_id');
 
-        $antrian = $this->antrianModel
-            ->where('kode_jenis', $kodeJenis)
-            ->where('status', 'Dipanggil')
-            ->where('kode_loket', $kodeLoket)
-            ->first();
+    $antrian = $this->antrianModel
+        ->where('kode_jenis', $kodeJenis)
+        ->where('status', 'Dipanggil')
+        ->where('kode_loket', $kodeLoket)
+        ->first();
 
-        if ($antrian) {
-            // 🔥 SOCKET EMIT RECALL
-            $this->emitSocket('panggil_ulang', [
-                'nomor'      => $antrian['kode_jenis'] . str_pad($antrian['nomor'], 3, '0', STR_PAD_LEFT),
-                'kode_loket' => $kodeLoket
-            ]);
-        }
+    if ($antrian) {
+        // Tambahkan Log Recall (Opsional tapi disarankan)
+        $this->logModel->insert([
+            'id_antrian' => $antrian['id_antrian'],
+            'aksi'       => 'RECALL',
+            'user_id'    => $userId,
+            'waktu'      => date('Y-m-d H:i:s')
+        ]);
 
-        return redirect()->to('/operator/dashboard');
+        // 🔥 SOCKET EMIT RECALL
+        $this->emitSocket('panggil_ulang', [
+            'nomor'      => $antrian['kode_jenis'] . str_pad($antrian['nomor'], 3, '0', STR_PAD_LEFT),
+            'kode_loket' => $kodeLoket
+        ]);
+        
+        return $this->response->setJSON(['status' => 'success', 'message' => 'Panggilan ulang dikirim']);
     }
+
+    return $this->response->setJSON(['status' => 'error', 'message' => 'Tidak ada antrian aktif'], 404);
+}
 
 public function selesai()
-    {
-        $session = session();
-        $kodeJenis = $session->get('kode_jenis');
-        $kodeLoket = $session->get('kode_loket');
-        $userId = $session->get('user_id');
+{
+    $session = session();
+    // Gunakan POST agar identitas tab tidak tertukar
+    $kodeJenis = $this->request->getPost('kode_jenis') ?: $session->get('kode_jenis');
+    $kodeLoket = $this->request->getPost('kode_loket') ?: $session->get('kode_loket');
+    $userId    = $session->get('user_id');
 
-        $antrianDipanggil = $this->antrianModel
-            ->where('kode_jenis', $kodeJenis)
-            ->where('status', 'Dipanggil')
-            ->where('kode_loket', $kodeLoket)
-            ->first();
+    $antrianDipanggil = $this->antrianModel
+        ->where('kode_jenis', $kodeJenis)
+        ->where('status', 'Dipanggil')
+        ->where('kode_loket', $kodeLoket)
+        ->first();
 
-        if ($antrianDipanggil) {
-            $this->antrianModel->update($antrianDipanggil['id_antrian'], [
-                'status' => 'Selesai',
-                'updated_at' => date('Y-m-d H:i:s')
-            ]);
+    if ($antrianDipanggil) {
+        $this->antrianModel->update($antrianDipanggil['id_antrian'], [
+            'status'     => 'Selesai',
+            'updated_at' => date('Y-m-d H:i:s')
+        ]);
 
-            $this->logModel->insert([
-                'id_antrian' => $antrianDipanggil['id_antrian'],
-                'aksi'       => 'SELESAI',
-                'user_id'    => $userId,
-                'waktu'      => date('Y-m-d H:i:s')
-            ]);
+        $this->logModel->insert([
+            'id_antrian' => $antrianDipanggil['id_antrian'],
+            'aksi'       => 'SELESAI',
+            'user_id'    => $userId,
+            'waktu'      => date('Y-m-d H:i:s')
+        ]);
 
-            // 🔥 SOCKET EMIT
-            $this->emitSocket('selesai_antrean', [
-                'nomor'      => $antrianDipanggil['kode_jenis'] . str_pad($antrianDipanggil['nomor'], 3, '0', STR_PAD_LEFT),
-                'kode_loket' => $kodeLoket
-            ]);
-        }
+        // 🔥 SOCKET EMIT
+        $this->emitSocket('selesai_antrean', [
+            'nomor'      => $antrianDipanggil['kode_jenis'] . str_pad($antrianDipanggil['nomor'], 3, '0', STR_PAD_LEFT),
+            'kode_loket' => $kodeLoket
+        ]);
 
-        return redirect()->to('/operator/dashboard');
+        return $this->response->setJSON(['status' => 'success', 'message' => 'Antrian selesai']);
     }
+
+    return $this->response->setJSON(['status' => 'error', 'message' => 'Tidak ada antrian untuk diselesaikan'], 404);
+}
 
     public function resetAntrian()
     {
@@ -302,13 +349,29 @@ public function selesai()
         ]);
     }
 
-    public function logoutOperator()
-    {
-        $session = session();
-        $session->remove(['kode_jenis', 'kode_loket', 'logged_in']);
-        $session->destroy();
+public function index()
+{
+    // Jika user mengakses /operator, langsung lempar ke halaman login utama
+    return redirect()->to(base_url('login'));
+}
 
-        return redirect()->to('/operator/operator_select');
+public function logoutOperator()
+{
+    $session = session();
+    $db = \Config\Database::connect();
+    $userId = $session->get('user_id');
+
+    if ($userId) {
+        // 📝 LOG: Catat aktivitas LOGOUT
+        $db->table('log_antrian')->insert([
+            'user_id' => $userId,
+            'aksi'    => 'LOGOUT',
+            'waktu'   => date('Y-m-d H:i:s')
+        ]);
     }
+    
+    $session->destroy();
+    return redirect()->to(base_url('login'))->with('success', 'Berhasil logout.');
+}
 }
 

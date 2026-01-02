@@ -24,11 +24,14 @@
         <div class="col-md-3">
             <label>Aksi</label>
             <select name="aksi" class="form-control">
-                <option value="">-- Semua --</option>
-                <option value="PANGGIL" <?= ($aksi ?? '') == 'PANGGIL' ? 'selected' : '' ?>>PANGGIL</option>
-                <option value="SELESAI" <?= ($aksi ?? '') == 'SELESAI' ? 'selected' : '' ?>>SELESAI</option>
-                <option value="TAMBAH" <?= ($aksi ?? '') == 'TAMBAH' ? 'selected' : '' ?>>TAMBAH</option>
-            </select>
+    <option value="">-- Semua --</option>
+    <option value="AMBIL" <?= ($aksi ?? '') == 'AMBIL' ? 'selected' : '' ?>>AMBIL</option>
+    <option value="PANGGIL" <?= ($aksi ?? '') == 'PANGGIL' ? 'selected' : '' ?>>PANGGIL</option>
+    <option value="RECALL" <?= ($aksi ?? '') == 'RECALL' ? 'selected' : '' ?>>RECALL</option>
+    <option value="SELESAI" <?= ($aksi ?? '') == 'SELESAI' ? 'selected' : '' ?>>SELESAI</option>
+    <option value="LOGIN" <?= ($aksi ?? '') == 'LOGIN' ? 'selected' : '' ?>>LOGIN</option>
+    <option value="LOGOUT" <?= ($aksi ?? '') == 'LOGOUT' ? 'selected' : '' ?>>LOGOUT</option>
+             </select>
         </div>
 
         <div class="col-md-3">
@@ -79,15 +82,30 @@
 
                         <!-- BADGE Aksi -->
                         <td>
-                            <span class="badge
-                                <?php 
-                                    if ($row['aksi'] == 'PANGGIL') echo 'bg-primary';
-                                    elseif ($row['aksi'] == 'SELESAI') echo 'bg-success';
-                                    elseif ($row['aksi'] == 'TAMBAH') echo 'bg-info text-dark';
-                                ?>">
-                                <?= $row['aksi']; ?>
-                            </span>
-                        </td>
+    <?php 
+        $a = strtoupper($row['aksi']); // Pastikan kapital
+        
+        // Menentukan kelas CSS berdasarkan aksi
+        if ($a == 'PANGGIL') {
+            $bg = 'bg-primary'; // Biru terang
+        } elseif ($a == 'SELESAI') {
+            $bg = 'bg-success'; // Hijau sukses
+        } elseif ($a == 'AMBIL') {
+            $bg = 'bg-info text-dark'; // Biru muda/cyan (untuk nasabah)
+        } elseif ($a == 'RECALL') {
+            $bg = 'bg-warning text-dark'; // Kuning (perlu perhatian)
+        } elseif ($a == 'LOGIN') {
+            $bg = 'bg-dark'; // Hitam (aktivitas sistem)
+        } elseif ($a == 'LOGOUT') {
+            $bg = 'bg-danger'; // Merah (aktivitas keluar)
+        } else {
+            $bg = 'bg-secondary'; // Abu-abu untuk aksi lainnya
+        }
+    ?>
+    <span class="badge <?= $bg ?> shadow-sm" style="min-width: 80px; font-weight: 600;">
+        <?= $a; ?>
+    </span>
+</td>
 
                         <td><?= $row['username'] ?? 'System'; ?></td>
                     </tr>
@@ -100,9 +118,11 @@
         </tbody>
     </table>
 
+    <?php if ($pager->getPageCount() > 1) : ?>
     <div class="mt-3">
         <?= $pager->links(); ?>
     </div>
+<?php endif; ?>
 </div>
 
 <!-- AUTO REFRESH (Jika Mau Aktifkan) -->

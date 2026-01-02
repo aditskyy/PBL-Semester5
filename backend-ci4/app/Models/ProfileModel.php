@@ -13,7 +13,6 @@ class ProfileModel extends Model
         'nama_instansi',
         'alamat',
         'telp',
-        'gambar_logo',
         'color_palette'
     ];
 }

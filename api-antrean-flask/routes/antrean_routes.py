@@ -13,12 +13,11 @@ def get_loket():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
-        # Tambahkan kode_loket ke dalam query SELECT
-        cursor.execute("SELECT kode_loket, kode_jenis, nama_loket, warna FROM loket")
+        # TAMBAHKAN KOLOM icon DI SINI
+        cursor.execute("SELECT kode_loket, kode_jenis, nama_loket, warna, icon FROM loket")
         lokets = cursor.fetchall()
         return jsonify(lokets)
     except Exception as e:
-        # Jika ada error (misal nama kolom salah), pesan error akan muncul di sini
         return jsonify({'success': False, 'message': str(e)}), 500
     finally:
         cursor.close()
@@ -86,8 +85,18 @@ def ambil_antrean():
         # ===============================
         cursor.execute("""
             INSERT INTO antrian (kode_jenis, kode_loket, nomor, tanggal, status, token)
-            VALUES (%s, %s, %s, CURDATE(), 'Menunggu', %s)
+            VALUES (%s, %s, %s, NOW(), 'Menunggu', %s)
         """, (kode_jenis, kode_loket, next_number, token))
+
+        # Ambil ID antrian yang baru saja dibuat untuk kebutuhan log
+        new_antrian_id = cursor.lastrowid
+
+        # ===============================
+        # 5b. CATAT KE LOG_ANTRIAN (TARUH DI SINI)
+        # ===============================
+        # Kita gunakan new_antrian_id agar log tersambung ke tabel antrian
+        query_log = "INSERT INTO log_antrian (id_antrian, user_id, aksi, waktu) VALUES (%s, %s, %s, NOW())"
+        cursor.execute(query_log, (new_antrian_id, 7, 'AMBIL'))
         conn.commit()
 
         # ===============================

@@ -8,6 +8,6 @@ class LoketModel extends Model
 {
     protected $table = 'loket';
     protected $primaryKey = 'kode_loket';
-    protected $allowedFields = ['kode_loket', 'nama_loket', 'kode_jenis'];
+    protected $allowedFields = ['kode_loket', 'nama_loket', 'kode_jenis', 'warna', 'icon'];
     protected $useAutoIncrement = false; // karena kode_loket manual
 }

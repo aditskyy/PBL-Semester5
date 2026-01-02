@@ -17,7 +17,7 @@
                 <th>Kode Jenis</th>
                 <th>Kode Loket</th>
                 <th>Nomor</th>
-                <th>Tanggal</th>
+                <th>Waktu Ambil</th>
                 <th>Status</th>
                 <th width="150px">Aksi</th>
             </tr>
@@ -31,7 +31,7 @@
                         <td><?= esc($row['kode_jenis']) ?></td>
                         <td><?= esc($row['kode_loket']) ?></td>
                         <td><strong><?= esc($row['nomor']) ?></strong></td>
-                        <td><?= esc($row['tanggal']) ?></td>
+                        <td><?= date('d/m/Y H:i:s', strtotime($row['tanggal'])) ?></td>
 
                         <td>
                             <?php if ($row['status'] == 'Menunggu'): ?>

@@ -38,10 +38,22 @@ class LoketController extends BaseController
 
     public function store()
     {
+        $rules = [
+        'kode_loket' => 'required|is_unique[loket.kode_loket]',
+        'nama_loket' => 'required',
+        'kode_jenis' => 'required'
+    ];
+
+    if (!$this->validate($rules)) {
+        return redirect()->back()->withInput()->with('errors', $this->validator->getErrors());
+    }
+        // Tambahkan validasi sederhana agar kode_loket tidak duplikat
         $this->loketModel->insert([
             'kode_loket' => $this->request->getPost('kode_loket'),
             'nama_loket' => $this->request->getPost('nama_loket'),
             'kode_jenis' => $this->request->getPost('kode_jenis'),
+            'warna'      => $this->request->getPost('warna'), // Tambahkan ini
+            'icon'       => $this->request->getPost('icon'),  // Tambahkan ini
         ]);
 
         return redirect()->to('/admin/loket')->with('success', 'Data berhasil ditambah');
@@ -58,16 +70,19 @@ class LoketController extends BaseController
         return view('admin/loket/edit', $data);
     }
 
+    
     public function update($kode)
     {
+        // Pastikan kolom warna dan icon ikut diperbarui
         $this->loketModel->update($kode, [
             'nama_loket' => $this->request->getPost('nama_loket'),
             'kode_jenis' => $this->request->getPost('kode_jenis'),
+            'warna'      => $this->request->getPost('warna'), // Tambahkan ini
+            'icon'       => $this->request->getPost('icon'),  // Tambahkan ini
         ]);
 
         return redirect()->to('/admin/loket')->with('success', 'Data berhasil diperbarui');
     }
-
     public function delete($kode)
     {
         $this->loketModel->delete($kode);

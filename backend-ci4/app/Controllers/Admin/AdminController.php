@@ -122,9 +122,28 @@ class AdminController extends BaseController
     // LOGOUT
     // ================================
     public function logout()
-    {
-        session()->destroy();
-        return redirect()->to('/login');
+{
+    $session = session();
+    $db = \Config\Database::connect();
+    
+    // Ambil ID User dari session sebelum dihancurkan
+    $userId = $session->get('user_id');
+
+    if ($userId) {
+        // Simpan log aktivitas LOGOUT
+        $db->table('log_antrian')->insert([
+            'id_antrian' => null,
+            'user_id'    => $userId,
+            'aksi'       => 'LOGOUT', // Pastikan ENUM 'LOGOUT' sudah ada di DB kamu
+            'waktu'      => date('Y-m-d H:i:s')
+        ]);
     }
+
+    // Hapus semua session
+    $session->destroy();
+
+    // Redirect ke login dengan pesan sukses
+    return redirect()->to('/login')->with('success', 'Berhasil logout!');
+}
 }
 

@@ -31,6 +31,24 @@
         </select>
     </div>
 
+    <div class="mb-3">
+    <label>Warna Loket (Muncul di TV/Display)</label>
+    <input type="color" name="warna" class="form-control form-control-color" 
+           value="<?= isset($loket) ? $loket['warna'] : '#1E88E5' ?>" title="Pilih warna loket">
+    <small class="text-muted">Warna ini akan menjadi background nomor antrean di layar</small>
+</div>
+
+<div class="mb-3">
+    <label>Icon (Bootstrap Icon Name)</label>
+    <select name="icon" class="form-control">
+        <option value="account_balance" <?= (isset($loket) && $loket['icon'] == 'account_balance') ? 'selected' : '' ?>>Bank (account_balance)</option>
+        <option value="people" <?= (isset($loket) && $loket['icon'] == 'people') ? 'selected' : '' ?>>People (people)</option>
+        <option value="credit_card" <?= (isset($loket) && $loket['icon'] == 'credit_card') ? 'selected' : '' ?>>Credit Card (credit_card)</option>
+        <option value="person" <?= (isset($loket) && $loket['icon'] == 'person') ? 'selected' : '' ?>>Person (person)</option>
+    </select>
+    <small class="text-muted">Pilih icon yang sesuai dengan fungsi loket</small>
+</div>
+
     <button class="btn btn-primary">Simpan</button>
 </form>
 

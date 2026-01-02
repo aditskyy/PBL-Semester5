@@ -4,15 +4,12 @@
 <h2 class="mb-4">Manajemen Profile</h2>
 
 <?php if(session()->getFlashdata('success')): ?>
-    <div class="alert alert-success">
-        <?= session()->getFlashdata('success') ?>
-    </div>
+    <div class="alert alert-success"><?= session()->getFlashdata('success') ?></div>
 <?php endif; ?>
 
 <table class="table table-striped table-bordered">
-      <thead class="table-dark"></thead>
     <tr>
-        <th>Nama Instansi</th>
+        <th width="200px">Nama Instansi</th>
         <td><?= esc($profile['nama_instansi']) ?></td>
     </tr>
     <tr>
@@ -24,15 +21,14 @@
         <td><?= esc($profile['telp']) ?></td>
     </tr>
     <tr>
-        <th>Logo</th>
+        <th>Warna Utama Sistem</th>
         <td>
-            <img src="<?= base_url('uploads/logo/'.$profile['gambar_logo']) ?>" height="80">
+            <div style="width: 50px; height: 20px; background: <?= esc($profile['color_palette']) ?>; border: 1px solid #000;"></div>
+            <?= esc($profile['color_palette']) ?>
         </td>
     </tr>
 </table>
 
-<a href="<?= base_url('admin/profile/edit/'.$profile['id']) ?>" class="btn btn-warning">
-    Edit Profile
-</a>
+<a href="<?= base_url('admin/profile/edit/'.$profile['id']) ?>" class="btn btn-warning">Edit Profile</a>
 
 <?= $this->endSection() ?>
