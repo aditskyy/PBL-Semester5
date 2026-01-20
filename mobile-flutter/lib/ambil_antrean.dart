@@ -10,10 +10,10 @@ class AmbilAntreanPage extends StatefulWidget {
 }
 
 class _AmbilAntreanPageState extends State<AmbilAntreanPage> {
-  String? selectedLoket; // Menyimpan kode_loket (misal: A-01)
-  String? selectedNamaLoket; // Menyimpan nama asli loket (misal: Teller-01)
+  String? selectedLoket;
+  String? selectedNamaLoket;
   bool isLoading = false;
-  
+
   late Future<List<dynamic>> _loketFuture;
 
   @override
@@ -22,30 +22,55 @@ class _AmbilAntreanPageState extends State<AmbilAntreanPage> {
     _loketFuture = ApiService.getDaftarLoket();
   }
 
-  // Fungsi Penerjemah String ke IconData
-IconData _getIconData(String? iconName) {
-  // Kita hanya fokus pada data di kolom 'icon' dari database
-  final name = iconName?.trim().toLowerCase() ?? '';
+  // ================= ICON SAFE =================
+  IconData _getIconData(String? iconName) {
+    if (iconName == null) return Icons.confirmation_number;
 
-  switch (name) {
-    case 'account_balance': 
-      return Icons.account_balance;
-    case 'credit_card': 
-      return Icons.credit_card;
-    case 'people': 
-      return Icons.people;
-    case 'person': 
-      return Icons.person;
-    case 'support_agent': 
-      return Icons.support_agent;
-    default: 
-      // Ikon default jika data di DB tidak cocok/kosong
-      return Icons.confirmation_number;
+    final name = iconName.trim().toLowerCase();
+
+    switch (name) {
+      case 'account_balance':
+        return Icons.account_balance;
+      case 'credit_card':
+        return Icons.credit_card;
+      case 'people':
+        return Icons.people;
+      case 'person':
+        return Icons.person;
+      case 'support_agent':
+        return Icons.support_agent;
+      default:
+        return Icons.confirmation_number;
+    }
   }
-}
 
+  // ================= COLOR SAFE =================
+  Color _parseColor(String? hex) {
+    if (hex == null || hex.isEmpty) return Colors.blueAccent;
+
+    try {
+      // Hapus spasi dan lowercase
+      final cleaned = hex.trim().toLowerCase();
+
+      // Format #RRGGBB atau RRGGBB
+      String hexColor =
+          cleaned.startsWith('#') ? cleaned.substring(1) : cleaned;
+
+      // Pastikan 6 karakter
+      if (hexColor.length == 6) {
+        return Color(int.parse('0xFF$hexColor'));
+      }
+
+      return Colors.blueAccent;
+    } catch (e) {
+      print('❌ Error parsing color: $hex - $e');
+      return Colors.blueAccent;
+    }
+  }
+
+  // ================= AMBIL ANTREAN =================
   Future<void> ambilAntrean() async {
-    if (selectedLoket == null) {
+    if (selectedLoket == null || selectedLoket!.isEmpty) {
       _showSnackBar("Pilih layanan terlebih dahulu");
       return;
     }
@@ -55,49 +80,46 @@ IconData _getIconData(String? iconName) {
     try {
       final response = await ApiService.ambilAntrean(selectedLoket!);
 
-      if (response['success'] == true) {
-        if (!mounted) return;
-
+      if (response['success'] == true && mounted) {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => TiketPage(
-              nomor: response['nomor'].toString(),
-              namaLoket: selectedNamaLoket ?? "LOKET",
-            ),
+            builder:
+                (_) => TiketPage(
+                  nomor: response['nomor']?.toString() ?? '-',
+                  namaLoket: selectedNamaLoket ?? 'LOKET',
+                ),
           ),
         );
       } else {
-        _showSnackBar(response['message'] ?? "Gagal mengambil antrean");
+        _showSnackBar(response['message'] ?? 'Gagal mengambil antrean');
       }
     } catch (e) {
-      _showSnackBar("Terjadi kesalahan koneksi: $e");
+      _showSnackBar("Kesalahan koneksi: $e");
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
   }
 
   void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  // ================= UI =================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: Colors.blueAccent,
-        title: const Text("Ambil Nomor Antrean", style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text("Ambil Nomor Antrean"),
         centerTitle: true,
-        elevation: 0,
+        backgroundColor: Colors.blueAccent,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
+      body: Padding(
+        padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            const SizedBox(height: 10),
             const Icon(Icons.touch_app, size: 60, color: Colors.blueAccent),
             const SizedBox(height: 10),
             const Text(
@@ -106,106 +128,210 @@ IconData _getIconData(String? iconName) {
             ),
             const SizedBox(height: 30),
 
-            FutureBuilder<List<dynamic>>(
-              future: _loketFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                } else if (snapshot.hasError || !snapshot.hasData || snapshot.data!.isEmpty) {
-                  return const Text("Gagal memuat daftar loket. Cek server Flask.");
-                }
+            // ================= FUTURE BUILDER =================
+            Expanded(
+              child: FutureBuilder<List<dynamic>>(
+                future: _loketFuture,
+                builder: (context, snapshot) {
+                  // Loading
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
-                return Column(
-                  children: [
-                    // --- GRID LAYOUT UNTUK LOKET ---
-                    Wrap(
+                  // Error
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.error_outline,
+                            size: 60,
+                            color: Colors.red,
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            "Error: ${snapshot.error}",
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.red),
+                          ),
+                          const SizedBox(height: 20),
+                          ElevatedButton(
+                            onPressed: () {
+                              setState(() {
+                                _loketFuture = ApiService.getDaftarLoket();
+                              });
+                            },
+                            child: const Text("Coba Lagi"),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  // No Data
+                  if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                    return const Center(
+                      child: Text("Tidak ada loket tersedia"),
+                    );
+                  }
+
+                  // 🔐 SUPER SAFE PARSING
+                  final lokets = <Map<String, dynamic>>[];
+
+                  for (var item in snapshot.data!) {
+                    if (item is Map<String, dynamic>) {
+                      // Debug print setiap item
+                      print('📦 Loket Item: $item');
+                      lokets.add(item);
+                    }
+                  }
+
+                  if (lokets.isEmpty) {
+                    return const Center(child: Text("Data loket tidak valid"));
+                  }
+
+                  return SingleChildScrollView(
+                    child: Wrap(
                       spacing: 15,
                       runSpacing: 15,
                       alignment: WrapAlignment.center,
-                      children: snapshot.data!.map((loket) {
-                        final kode = loket['kode_loket']; // Key dari DB
-                        final nama = loket['nama_loket'];
-                        final iconDb = loket['icon']?.toString().trim() ?? '';
-                        final warnaDb = loket['warna'] ?? "#1976D2"; 
-                        
-                        final isSelected = selectedLoket == kode;
-                        final Color themeColor = Color(int.parse(warnaDb.replaceAll('#', '0xFF')));
-                      
+                      children:
+                          lokets.map((loket) {
+                            // 🔐 SUPER SAFE NULL HANDLING
+                            String kode = '';
+                            String nama = 'LOKET';
+                            String? iconDb;
+                            String? warnaDb;
 
-                        // TAMBAHKAN PRINT INI:
-                        print("LOG: Data Ikon adalah '$iconDb'");
-                  
-                        return GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              selectedLoket = kode;
-                              selectedNamaLoket = nama;
-                            });
-                          },
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            width: MediaQuery.of(context).size.width * 0.4,
-                            padding: const EdgeInsets.all(15),
-                            decoration: BoxDecoration(
-                              color: isSelected ? themeColor : Colors.white,
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: isSelected ? themeColor : Colors.grey.shade300,
-                                width: 2,
-                              ),
-                              boxShadow: isSelected ? [
-                                BoxShadow(color: themeColor.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))
-                              ] : [],
-                            ),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _getIconData(iconDb),
-                                  size: 45,
-                                  color: isSelected ? Colors.white : themeColor,
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  nama,
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: isSelected ? Colors.white : Colors.black87,
+                            try {
+                              // Coba berbagai kemungkinan nama field
+                              kode =
+                                  (loket['kode_jenis'] ??
+                                          loket['kode_loket'] ??
+                                          loket['kode'] ??
+                                          '')
+                                      .toString();
+
+                              nama =
+                                  (loket['nama'] ??
+                                          loket['nama_loket'] ??
+                                          'LOKET')
+                                      .toString();
+
+                              iconDb = loket['icon']?.toString();
+                              warnaDb = loket['warna']?.toString();
+
+                              print(
+                                '✅ Parsed - Kode: $kode, Nama: $nama, Icon: $iconDb, Warna: $warnaDb',
+                              );
+                            } catch (e) {
+                              print('❌ Error parsing loket: $e');
+                              print('❌ Loket data: $loket');
+                            }
+
+                            // Skip jika kode kosong
+                            if (kode.isEmpty) {
+                              print('⚠️ Skipping loket dengan kode kosong');
+                              return const SizedBox.shrink();
+                            }
+
+                            final isSelected = selectedLoket == kode;
+                            final themeColor = _parseColor(warnaDb);
+
+                            return GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  selectedLoket = kode;
+                                  selectedNamaLoket = nama;
+                                });
+                                print('🎯 Selected: $kode - $nama');
+                              },
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                width: MediaQuery.of(context).size.width * 0.42,
+                                padding: const EdgeInsets.all(15),
+                                decoration: BoxDecoration(
+                                  color: isSelected ? themeColor : Colors.white,
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color:
+                                        isSelected
+                                            ? themeColor
+                                            : Colors.grey.shade300,
+                                    width: 2,
                                   ),
+                                  boxShadow:
+                                      isSelected
+                                          ? [
+                                            BoxShadow(
+                                              color: themeColor.withOpacity(
+                                                0.3,
+                                              ),
+                                              blurRadius: 8,
+                                              offset: const Offset(0, 4),
+                                            ),
+                                          ]
+                                          : [],
                                 ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                    
-                    const SizedBox(height: 50),
-                    
-                    // --- TOMBOL KONFIRMASI ---
-                    SizedBox(
-                      width: double.infinity,
-                      height: 55,
-                      child: ElevatedButton(
-                        onPressed: isLoading ? null : ambilAntrean,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blueAccent,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                          elevation: 5,
-                        ),
-                        child: isLoading
-                            ? const CircularProgressIndicator(color: Colors.white)
-                            : const Text(
-                                "KONFIRMASI AMBIL ANTREAN", 
-                                style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _getIconData(iconDb),
+                                      size: 45,
+                                      color:
+                                          isSelected
+                                              ? Colors.white
+                                              : themeColor,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      nama,
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color:
+                                            isSelected
+                                                ? Colors.white
+                                                : Colors.black,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                      ),
+                            );
+                          }).toList(),
                     ),
-                  ],
-                );
-              },
+                  );
+                },
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            SizedBox(
+              width: double.infinity,
+              height: 55,
+              child: ElevatedButton(
+                onPressed: isLoading ? null : ambilAntrean,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueAccent,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                ),
+                child:
+                    isLoading
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Text(
+                          "KONFIRMASI AMBIL ANTREAN",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+              ),
             ),
           ],
         ),

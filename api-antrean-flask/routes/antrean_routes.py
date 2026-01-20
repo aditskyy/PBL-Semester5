@@ -6,124 +6,110 @@ from routes.socket import emit_ambil_antrean
 antrean_bp = Blueprint('antrean', __name__)
 
 # ===============================
-# ENDPOINT: AMBIL DAFTAR LOKET (UNTUK FLUTTER DINAMIS)
+# GET JENIS LAYANAN / LOKET (UNTUK UI)
 # ===============================
 @antrean_bp.route('/get-loket', methods=['GET'])
 def get_loket():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
-        # TAMBAHKAN KOLOM icon DI SINI
-        cursor.execute("SELECT kode_loket, kode_jenis, nama_loket, warna, icon FROM loket")
-        lokets = cursor.fetchall()
-        return jsonify(lokets)
+        # ✅ AMBIL DARI TABEL jenis_loket DAN JOIN dengan loket untuk warna/icon
+        cursor.execute("""
+            SELECT 
+                j.kode_jenis,
+                j.nama_jenis AS nama,
+                l.warna,
+                l.icon
+            FROM jenis_loket j
+            LEFT JOIN loket l ON j.kode_jenis = l.kode_jenis
+            GROUP BY j.kode_jenis, j.nama_jenis
+        """)
+        
+        result = cursor.fetchall()
+        
+        # 🔍 DEBUG PRINT
+        print(f"📦 Total jenis loket: {len(result)}")
+        for idx, loket in enumerate(result):
+            print(f"📦 Loket {idx + 1}: {loket}")
+        
+        return jsonify(result)
+        
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        print(f"❌ Error get_loket: {e}")
+        return jsonify({'error': str(e)}), 500
     finally:
         cursor.close()
         conn.close()
 
+# ===============================
+# AMBIL ANTREAN (BERDASARKAN JENIS)
+# ===============================
 @antrean_bp.route('/ambil-antrean', methods=['POST'])
 def ambil_antrean():
-    # ===============================
-    # 1. VALIDASI INPUT (Sekarang menerima kode_loket)
-    # ===============================
     data = request.get_json()
-    if not data or 'kode_loket' not in data:
-        return jsonify({
-            'success': False,
-            'message': 'kode_loket wajib diisi'
-        }), 400
+    
+    print(f"📥 Request data: {data}")
+    
+    if not data or 'kode_jenis' not in data:
+        return jsonify({'success': False, 'message': 'kode_jenis wajib diisi'}), 400
 
-    kode_loket_input = data['kode_loket'] # Contoh: "A-01"
+    kode_jenis = data['kode_jenis']
     token = uuid.uuid4().hex[:8]
 
-    # ===============================
-    # 2. KONEKSI DATABASE
-    # ===============================
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
     try:
-        # ===============================
-        # 3. AMBIL DATA LOKET BERDASARKAN KODE_LOKET
-        # ===============================
-        # Kita butuh kode_jenis (A/B/C) untuk format nomor tiket
-        cursor.execute(
-            "SELECT kode_loket, kode_jenis FROM loket WHERE kode_loket = %s LIMIT 1",
-            (kode_loket_input,)
-        )
-        loket = cursor.fetchone()
-
-        if not loket:
-            return jsonify({
-                'success': False,
-                'message': 'Loket tidak ditemukan'
-            }), 404 # Ini yang menyebabkan error 404 jika data tidak pas
-
-        kode_loket = loket['kode_loket']
-        kode_jenis = loket['kode_jenis']
-
-        # ===============================
-        # 4. AMBIL NOMOR ANTRIAN TERAKHIR
-        # ===============================
+        # Cek nomor terakhir hari ini
         cursor.execute("""
             SELECT nomor FROM antrian
-            WHERE kode_loket = %s
+            WHERE kode_jenis = %s
               AND DATE(tanggal) = CURDATE()
             ORDER BY id_antrian DESC
             LIMIT 1
-        """, (kode_loket,))
-        last_antrian = cursor.fetchone()
+        """, (kode_jenis,))
+        last = cursor.fetchone()
 
-        next_number = last_antrian['nomor'] + 1 if last_antrian else 1
-        # Hasil format: A001, B002, dll
+        next_number = last['nomor'] + 1 if last else 1
         nomor_format = f"{kode_jenis}{str(next_number).zfill(3)}"
+        
+        print(f"✅ Nomor baru: {nomor_format}")
 
-        # ===============================
-        # 5. SIMPAN ANTRIAN BARU
-        # ===============================
+        # Insert antrean baru (tanpa kode_loket dulu, akan diisi saat dipanggil)
         cursor.execute("""
-            INSERT INTO antrian (kode_jenis, kode_loket, nomor, tanggal, status, token)
-            VALUES (%s, %s, %s, NOW(), 'Menunggu', %s)
-        """, (kode_jenis, kode_loket, next_number, token))
+            INSERT INTO antrian (kode_jenis, nomor, tanggal, status, token)
+            VALUES (%s, %s, NOW(), 'Menunggu', %s)
+        """, (kode_jenis, next_number, token))
 
-        # Ambil ID antrian yang baru saja dibuat untuk kebutuhan log
-        new_antrian_id = cursor.lastrowid
+        new_id = cursor.lastrowid
 
-        # ===============================
-        # 5b. CATAT KE LOG_ANTRIAN (TARUH DI SINI)
-        # ===============================
-        # Kita gunakan new_antrian_id agar log tersambung ke tabel antrian
-        query_log = "INSERT INTO log_antrian (id_antrian, user_id, aksi, waktu) VALUES (%s, %s, %s, NOW())"
-        cursor.execute(query_log, (new_antrian_id, 7, 'AMBIL'))
+        # Log aktivitas
+        cursor.execute("""
+            INSERT INTO log_antrian (id_antrian, user_id, aksi, waktu)
+            VALUES (%s, %s, %s, NOW())
+        """, (new_id, 7, 'AMBIL'))
+
         conn.commit()
 
-        # ===============================
-        # 6. EMIT WEBSOCKET (REAL-TIME)
-        # ===============================
+        # Emit socket
         emit_ambil_antrean({
             'kode_jenis': kode_jenis,
-            'kode_loket': kode_loket,
             'nomor': next_number,
             'nomor_format': nomor_format,
             'status': 'Menunggu',
             'token': token
         })
 
-        # ===============================
-        # 7. RESPONSE KE CLIENT (SINKRON DENGAN FLUTTER)
-        # ===============================
         return jsonify({
             'success': True,
-            'nomor': nomor_format, # Flutter mencari kunci 'nomor'
-            'token': token,
-            'message': f'Nomor antrean {nomor_format} berhasil diambil.'
+            'nomor': nomor_format,
+            'token': token
         })
 
+    except Exception as e:
+        print(f"❌ Error ambil_antrean: {e}")
+        conn.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
     finally:
-        # ===============================
-        # 8. TUTUP KONEKSI DATABASE
-        # ===============================
         cursor.close()
         conn.close()
